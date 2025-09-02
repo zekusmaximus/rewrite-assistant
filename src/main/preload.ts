@@ -7,6 +7,8 @@ import { Manuscript } from '../shared/types';
 contextBridge.exposeInMainWorld('electronAPI', {
   // File operations
   loadFile: (): Promise<Manuscript | null> => ipcRenderer.invoke(IPC_CHANNELS.LOAD_FILE),
+  loadSpecificFile: (filePath: string): Promise<Manuscript | null> => ipcRenderer.invoke(IPC_CHANNELS.LOAD_SPECIFIC_FILE, filePath),
+  autoLoadManuscript: (): Promise<Manuscript | null> => ipcRenderer.invoke(IPC_CHANNELS.AUTO_LOAD_MANUSCRIPT),
   saveFile: (manuscript: Manuscript): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS.SAVE_FILE, manuscript),
   
   // Platform info
@@ -25,6 +27,8 @@ declare global {
   interface Window {
     electronAPI: {
       loadFile: () => Promise<Manuscript | null>;
+      loadSpecificFile: (filePath: string) => Promise<Manuscript | null>;
+      autoLoadManuscript: () => Promise<Manuscript | null>;
       saveFile: (manuscript: Manuscript) => Promise<string | null>;
       platform: string;
       versions: {

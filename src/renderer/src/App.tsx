@@ -20,6 +20,38 @@ const App: React.FC = () => {
     canRedo
   } = useManuscriptStore();
 
+  // Auto-load manuscript.txt on startup
+  useEffect(() => {
+    const autoLoadManuscript = async () => {
+      try {
+        console.log('Starting auto-load process...');
+        setLoading(true);
+        setError(null);
+        
+        // Try to auto-load manuscript.txt from the project root
+        const loadedManuscript = await window.electronAPI?.autoLoadManuscript();
+        
+        if (loadedManuscript) {
+          setManuscript(loadedManuscript);
+          console.log('Auto-loaded manuscript.txt successfully with', loadedManuscript.scenes.length, 'scenes');
+        } else {
+          // File doesn't exist or couldn't be loaded, that's OK - user can load manually
+          console.log('manuscript.txt not found or failed to load, user will need to load manually');
+        }
+      } catch (err) {
+        // Don't show error for auto-load failures, just log it
+        console.log('Auto-load failed (this is OK):', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    // Only auto-load if no manuscript is currently loaded
+    if (!manuscript) {
+      autoLoadManuscript();
+    }
+  }, []); // Only run on mount
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -41,13 +73,14 @@ const App: React.FC = () => {
       setLoading(true);
       setError(null);
       
-      // For now, just simulate loading since we need to fix the electronAPI first
-      setTimeout(() => {
-        setLoading(false);
-        console.log('Simulated file load complete');
-      }, 1000);
+      const loadedManuscript = await window.electronAPI?.loadFile();
+      
+      if (loadedManuscript) {
+        setManuscript(loadedManuscript);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load file');
+    } finally {
       setLoading(false);
     }
   };
@@ -59,13 +92,14 @@ const App: React.FC = () => {
       setLoading(true);
       setError(null);
       
-      // Simulate saving
-      setTimeout(() => {
-        setLoading(false);
-        console.log('File saved');
-      }, 500);
+      const savedPath = await window.electronAPI?.saveFile(manuscript);
+      
+      if (savedPath) {
+        console.log('File saved to:', savedPath);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save file');
+    } finally {
       setLoading(false);
     }
   };

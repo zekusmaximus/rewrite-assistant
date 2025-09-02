@@ -25,9 +25,14 @@ export const SUPPORTED_FILE_TYPES = [
 // IPC channel names
 export const IPC_CHANNELS = {
   LOAD_FILE: 'load-file',
+  LOAD_SPECIFIC_FILE: 'load-specific-file',
+  AUTO_LOAD_MANUSCRIPT: 'auto-load-manuscript',
   SAVE_FILE: 'save-file',
   FILE_LOADED: 'file-loaded',
   FILE_SAVED: 'file-saved',
   ERROR: 'error'
 };
+
+// Default manuscript file name
+export const DEFAULT_MANUSCRIPT_FILE = 'manuscript.txt';
 
