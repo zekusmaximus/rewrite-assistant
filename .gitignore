@@ -3,12 +3,19 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
 # Build outputs
 out/
 dist/
 build/
 .vite/
+.parcel-cache/
+.cache/
+.next/
+.nuxt/
+.turbo/
+.vercel/
 
 # Electron build artifacts
 *.exe
@@ -29,11 +36,7 @@ build/
 ehthumbs.db
 Thumbs.db
 *.stackdump
-
-# Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
+desktop.ini
 $RECYCLE.BIN/
 
 # Linux
@@ -84,20 +87,10 @@ jspm_packages/
 # Yarn Integrity file
 .yarn-integrity
 
-# parcel-bundler cache (https://parceljs.org/)
-.cache
-.parcel-cache
-
-# Next.js build output
-.next
-
-# Nuxt.js build / generate output
-.nuxt
-dist
-
-# Gatsby files
-.cache/
-public
+# Package manager lock files (comment out if you want to commit them)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 
 # Storybook build outputs
 .out
@@ -110,12 +103,13 @@ temp/
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+*.sublime-workspace
 
 # Environment variables
 .env
@@ -123,6 +117,7 @@ temp/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.*.local
 
 # Database files
 *.db
@@ -132,3 +127,13 @@ temp/
 # Application data
 app-data/
 user-data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Backup files
+*.bak
+*.swp
+*.swo
