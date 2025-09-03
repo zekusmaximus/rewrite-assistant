@@ -27,7 +27,7 @@ export interface PreviousRegistry {
   aliases: Map<string, Set<string>>; // key: canonical, value: alias set
 }
 
-export interface CharacterAdequacyCandidate {
+export interface CharacterDetectionTarget {
   characterName: string;
   aliasNames: string[];
   firstOccurrence: [number, number];
@@ -196,21 +196,21 @@ export function detectRelationshipTerms(sentenceText: string): string[] {
   return found;
 }
 
-export function prepareCandidates(
+export function prepareDetectionTargets(
   names: readonly NameOccurrence[],
   sceneText: string,
   sentences: readonly { text: string; start: number; end: number }[],
   reg: PreviousRegistry
-): CharacterAdequacyCandidate[] {
+): CharacterDetectionTarget[] {
   const cset = toLowerSet(reg.canonical);
   const aset = toLowerSet(flattenAliases(reg));
-  const cands: CharacterAdequacyCandidate[] = [];
+  const targets: CharacterDetectionTarget[] = [];
   for (const n of names) {
     const low = n.name.toLowerCase();
     const known = n.isFull ? cset.has(low) : aset.has(low);
     if (!known && (n.isFirstOnly || n.nickname) && !n.hasApposition) {
       const sent = sentences[n.sentenceIndex]?.text ?? '';
-      cands.push({
+      targets.push({
         characterName: n.name,
         aliasNames: Array.from(new Set([firstLastTokens(n.name).first, firstLastTokens(n.name).last, n.nickname].filter(Boolean) as string[])),
         firstOccurrence: [n.start, n.end],
@@ -225,7 +225,7 @@ export function prepareCandidates(
       });
     }
   }
-  return cands;
+  return targets;
 }
 
 // ---------- Internal helpers for local analysis ----------
@@ -300,11 +300,11 @@ function registryKnownNames(reg: PreviousRegistry): string[] {
   return Array.from(reg.canonical);
 }
 
-function buildAIHeader(scene: Scene, cands: readonly CharacterAdequacyCandidate[], reg: PreviousRegistry): string {
+function buildAIHeader(scene: Scene, targets: readonly CharacterDetectionTarget[], reg: PreviousRegistry): string {
   const lines: string[] = [];
-  lines.push('[[Character adequacy candidates]]');
+  lines.push('[[Character detection targets]]');
   lines.push(`scene: id=${scene.id} pos=${scene.position}`);
-  const chosen = cands.slice(0, 8);
+  const chosen = targets.slice(0, 8);
   for (const c of chosen) {
     const sent = (c.sentenceText || '').slice(0, 140).replace(/\n+/g, ' ');
     const aliases = c.aliasNames.slice(0, 4).join(', ') || 'none';
@@ -318,11 +318,11 @@ function buildAIHeader(scene: Scene, cands: readonly CharacterAdequacyCandidate[
   return lines.join('\n');
 }
 
-function buildSceneExcerpt(text: string, cands: readonly CharacterAdequacyCandidate[], maxLen = 1200): string {
-  if (!cands.length) return text.slice(0, maxLen);
+function buildSceneExcerpt(text: string, targets: readonly CharacterDetectionTarget[], maxLen = 1200): string {
+  if (!targets.length) return text.slice(0, maxLen);
   const snippets: string[] = [];
   const used: [number, number][] = [];
-  for (const c of cands) {
+  for (const c of targets) {
     const [s, e] = c.firstOccurrence;
     const snip = contextSnippet(text, s, e, 220);
     if (!snip) continue;
@@ -338,10 +338,10 @@ function buildSceneExcerpt(text: string, cands: readonly CharacterAdequacyCandid
 function mapAICharacterIssues(
   resp: { issues?: ContinuityIssue[] } | null | undefined,
   sceneText: string,
-  cands: readonly CharacterAdequacyCandidate[]
+  targets: readonly CharacterDetectionTarget[]
 ): ContinuityIssue[] {
-  const byName = new Map<string, CharacterAdequacyCandidate>();
-  for (const c of cands) byName.set(c.characterName.toLowerCase(), c);
+  const byName = new Map<string, CharacterDetectionTarget>();
+  for (const c of targets) byName.set(c.characterName.toLowerCase(), c);
   const out: ContinuityIssue[] = [];
   for (const it of resp?.issues ?? []) {
     if ((it.type ?? 'character') !== 'character') continue;
@@ -356,13 +356,13 @@ function mapAICharacterIssues(
       });
       continue;
     }
-    // Fallback: attach to candidate first occurrence by name if present
+    // Fallback: attach to detection target first occurrence by name if present
     const key = (it.description ?? '').toLowerCase();
-    let chosen = null as CharacterAdequacyCandidate | null;
+    let chosen = null as CharacterDetectionTarget | null;
     for (const [nm, c] of byName) {
       if (key.includes(nm)) { chosen = c; break; }
     }
-    chosen ??= cands[0] ?? null;
+    chosen ??= targets[0] ?? null;
     const span: [number, number] = chosen ? chosen.firstOccurrence : [0, Math.min(1, sceneText.length)];
     out.push({
       type: 'character',
@@ -461,16 +461,16 @@ function assessPronounBeforeNaming(
   return issues;
 }
 // ---------- Detector implementation ----------
-export default class CharacterDetector extends BaseDetector<CharacterAdequacyCandidate> {
+export default class CharacterDetector extends BaseDetector<CharacterDetectionTarget> {
   public readonly detectorType = 'character' as const;
 
   protected async localDetection(
     scene: Scene,
     previousScenes: readonly Scene[],
     _aiManager: AIServiceManager
-  ): Promise<LocalDetectionResult<CharacterAdequacyCandidate>> {
+  ): Promise<LocalDetectionResult<CharacterDetectionTarget>> {
     if (!scene?.text || typeof scene.text !== 'string' || scene.text.trim().length === 0) {
-      return { issues: [], requiresAI: false, candidates: [] };
+      return { issues: [], requiresAI: false, targets: [] };
     }
 
     const doc = await this.safeNLP(scene.text);
@@ -545,18 +545,18 @@ export default class CharacterDetector extends BaseDetector<CharacterAdequacyCan
       }
     }
 
-    const candidates = prepareCandidates(currentNames, scene.text, sentences, reg);
-    console.debug('[CharacterDetector] names:', currentNames.length, 'unknownFirst:', unknownFirstMentions, 'relTerms:', relTermsFound, 'cands:', candidates.length);
+    const targets = prepareDetectionTargets(currentNames, scene.text, sentences, reg);
+    console.debug('[CharacterDetector] names:', currentNames.length, 'unknownFirst:', unknownFirstMentions, 'relTerms:', relTermsFound, 'targets:', targets.length);
 
     return {
       issues,
-      requiresAI: candidates.length > 0,
-      candidates,
+      requiresAI: targets.length > 0,
+      targets,
       stats: {
         namesFound: currentNames.length,
         unknownFirstMentions,
         relTermsFound,
-        candidates: candidates.length,
+        targets: targets.length,
       },
     };
   }
@@ -565,13 +565,13 @@ export default class CharacterDetector extends BaseDetector<CharacterAdequacyCan
     scene: Scene,
     previousScenes: readonly Scene[],
     aiManager: AIServiceManager,
-    candidates: readonly CharacterAdequacyCandidate[]
+    targets: readonly CharacterDetectionTarget[]
   ): Promise<ContinuityIssue[]> {
-    if (!candidates || candidates.length === 0) return [];
+    if (!targets || targets.length === 0) return [];
     try {
       const reg = getOrBuildRegistry(previousScenes);
-      const header = buildAIHeader(scene, candidates, reg);
-      const excerpt = buildSceneExcerpt(scene.text, candidates, 1200);
+      const header = buildAIHeader(scene, targets, reg);
+      const excerpt = buildSceneExcerpt(scene.text, targets, 1200);
       const lastPrev = previousScenes.slice(-1).map(s => ({ ...s, text: (s.text ?? '').slice(0, 800) }));
       const req = {
         scene: { ...scene, text: `${header}\n\n${excerpt}` },
@@ -580,9 +580,9 @@ export default class CharacterDetector extends BaseDetector<CharacterAdequacyCan
         readerContext: buildReaderContext(registryKnownNames(reg)),
       } as Parameters<AIServiceManager['analyzeContinuity']>[0];
 
-      console.debug('[CharacterDetector] invoking AI (consistency) for candidates:', candidates.length);
+      console.debug('[CharacterDetector] invoking AI (consistency) for targets:', targets.length);
       const resp = await aiManager.analyzeContinuity(req);
-      const out = mapAICharacterIssues(resp, scene.text, candidates);
+      const out = mapAICharacterIssues(resp, scene.text, targets);
       console.debug('[CharacterDetector] AI returned character issues:', out.length);
       return out;
     } catch (err) {

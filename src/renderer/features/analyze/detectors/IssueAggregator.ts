@@ -100,17 +100,17 @@ function dominantType(issues: readonly ContinuityIssue[]): Typ {
     count.set(it.type, (count.get(it.type) ?? 0) + 1);
     must.set(it.type, (must.get(it.type) ?? 0) + (it.severity === 'must-fix' ? 1 : 0));
   }
-  let best: Typ = issues[0]?.type ?? 'pronoun';
+  let primary: Typ = issues[0]?.type ?? 'pronoun';
   for (const t of new Set(issues.map((i) => i.type))) {
     const c = count.get(t) ?? 0;
     const cm = must.get(t) ?? 0;
-    const bc = count.get(best) ?? 0;
-    const bm = must.get(best) ?? 0;
-    if (c > bc || (c === bc && cm > bm) || (c === bc && cm === bm && (TYPE_ORDER.indexOf(t) - TYPE_ORDER.indexOf(best) < 0))) {
-      best = t;
+    const bc = count.get(primary) ?? 0;
+    const bm = must.get(primary) ?? 0;
+    if (c > bc || (c === bc && cm > bm) || (c === bc && cm === bm && (TYPE_ORDER.indexOf(t) - TYPE_ORDER.indexOf(primary) < 0))) {
+      primary = t;
     }
   }
-  return best;
+  return primary;
 }
 
 /** Merge a group of duplicate issues into a representative issue. */
@@ -124,14 +124,14 @@ export function mergeGroup(issues: readonly ContinuityIssue[], groupIndexes: num
   for (const it of group) { const [s, e] = it.textSpan ?? [0, 0]; if (s < start) start = s; if (e > end) end = e; }
   if (!Number.isFinite(start) || !Number.isFinite(end)) { start = 0; end = 0; }
   // Description: longest concise, then optional detector suffix
-  let bestDesc = '';
-  for (const it of group) if (sanitizeDescription(it.description).length > bestDesc.length) bestDesc = sanitizeDescription(it.description);
-  bestDesc = truncate(bestDesc, 220);
+  let longestDesc = '';
+  for (const it of group) if (sanitizeDescription(it.description).length > longestDesc.length) longestDesc = sanitizeDescription(it.description);
+  longestDesc = truncate(longestDesc, 220);
   const srcs = new Set<string>();
   for (const it of group) { const s = (it as any)._src; if (typeof s === 'string' && s) srcs.add(s); }
   if (srcs.size > 1) {
     const suffix = Array.from(srcs).slice(0, 2).join(',');
-    bestDesc = `${bestDesc} [from: ${suffix}]`;
+    longestDesc = `${longestDesc} [from: ${suffix}]`;
   }
   // Suggested fix: prefer shortest non-empty
   let fix: string | undefined;
@@ -143,7 +143,7 @@ export function mergeGroup(issues: readonly ContinuityIssue[], groupIndexes: num
   return {
     type: typ,
     severity: sev,
-    description: bestDesc,
+    description: longestDesc,
     textSpan: [Math.max(0, start), Math.max(0, end)],
     ...(fix ? { suggestedFix: fix } : {}),
   };

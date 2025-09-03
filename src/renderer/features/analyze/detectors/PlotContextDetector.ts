@@ -43,7 +43,7 @@ export interface PlotObservation {
   connector?: string;
 }
 
-export interface PlotCandidate {
+export interface PlotDetectionTarget {
   markerText: string;
   sentenceText: string;
   context: string;
@@ -321,7 +321,7 @@ function isWorldEntityAmbiguous(name: string): boolean {
   return isSingleWord && notAllCaps;
 }
 
-// ---------- Issue generation and candidate assembly ----------
+// ---------- Issue generation and detection target assembly ----------
 function generateImmediateIssues(
   observations: PlotObservation[],
   registry: PreviousPlotRegistry
@@ -358,11 +358,11 @@ function generateImmediateIssues(
   return issues;
 }
 
-function addAmbiguousEventCandidates(cands: PlotCandidate[], defEvents: PlotObservation[], sceneText: string, regSummary: string[]): void {
+function addAmbiguousEventTargets(targets: PlotDetectionTarget[], defEvents: PlotObservation[], sceneText: string, regSummary: string[]): void {
   const heads = new Set(defEvents.map(o => normalizeKey(o.head ?? '')));
   if (defEvents.length >= 2 && heads.size >= 2) {
     for (const o of defEvents) {
-      cands.push({
+      targets.push({
         markerText: o.markerText,
         sentenceText: o.sentenceText ?? '',
         context: contextSnippet(sceneText, o.start, o.end),
@@ -375,10 +375,10 @@ function addAmbiguousEventCandidates(cands: PlotCandidate[], defEvents: PlotObse
   }
 }
 
-function addWorldAmbiguousCandidates(cands: PlotCandidate[], world: PlotObservation[], defEvents: PlotObservation[], sceneText: string, regSummary: string[]): void {
+function addWorldAmbiguousTargets(targets: PlotDetectionTarget[], world: PlotObservation[], defEvents: PlotObservation[], sceneText: string, regSummary: string[]): void {
   for (const o of world) {
     if (isWorldEntityAmbiguous(o.markerText)) {
-      cands.push({
+      targets.push({
         markerText: o.markerText,
         sentenceText: o.sentenceText ?? '',
         context: contextSnippet(sceneText, o.start, o.end),
@@ -391,11 +391,11 @@ function addWorldAmbiguousCandidates(cands: PlotCandidate[], world: PlotObservat
   }
 }
 
-function addCausalChainCandidates(cands: PlotCandidate[], causal: PlotObservation[], sceneText: string, regSummary: string[]): void {
+function addCausalChainTargets(targets: PlotDetectionTarget[], causal: PlotObservation[], sceneText: string, regSummary: string[]): void {
   const causalBySentence = new Set(causal.map(c => c.sentenceIndex));
   if (causalBySentence.size >= 2) {
     for (const o of causal) {
-      cands.push({
+      targets.push({
         markerText: o.markerText,
         sentenceText: o.sentenceText ?? '',
         context: contextSnippet(sceneText, o.start, o.end),
@@ -408,48 +408,48 @@ function addCausalChainCandidates(cands: PlotCandidate[], causal: PlotObservatio
   }
 }
 
-export function assemblePlotCandidates(
+export function assemblePlotDetectionTargets(
   observations: PlotObservation[],
   registry: PreviousPlotRegistry,
   sceneText: string
-): PlotCandidate[] {
-  const cands: PlotCandidate[] = [];
+): PlotDetectionTarget[] {
+  const targets: PlotDetectionTarget[] = [];
   const regSummary = summarizeRegistry(registry);
   const defEvents = observations.filter(o => o.kind === 'definiteEvent');
   const world = observations.filter(o => o.kind === 'worldEntity');
   const causal = observations.filter(o => o.kind === 'causalConnector');
-
-  addAmbiguousEventCandidates(cands, defEvents, sceneText, regSummary);
-  addWorldAmbiguousCandidates(cands, world, defEvents, sceneText, regSummary);
-  addCausalChainCandidates(cands, causal, sceneText, regSummary);
-  return cands;
+ 
+  addAmbiguousEventTargets(targets, defEvents, sceneText, regSummary);
+  addWorldAmbiguousTargets(targets, world, defEvents, sceneText, regSummary);
+  addCausalChainTargets(targets, causal, sceneText, regSummary);
+  return targets;
 }
 
 // ---------- Detector implementation ----------
-export default class PlotContextDetector extends BaseDetector<PlotCandidate> {
+export default class PlotContextDetector extends BaseDetector<PlotDetectionTarget> {
   public readonly detectorType = 'plot' as const;
 
   protected async localDetection(
     scene: Scene,
     previousScenes: readonly Scene[],
     _aiManager: AIServiceManager
-  ): Promise<LocalDetectionResult<PlotCandidate>> {
+  ): Promise<LocalDetectionResult<PlotDetectionTarget>> {
     if (!scene?.text || typeof scene.text !== 'string' || scene.text.trim().length === 0) {
-      return { issues: [], requiresAI: false, candidates: [] };
+      return { issues: [], requiresAI: false, targets: [] };
     }
-
+ 
     const doc = await this.prepareDoc(scene.text);
     const sentences = splitSentences(scene.text);
     const registry = buildPreviousPlotRegistry(previousScenes);
-
+ 
     const { observations, eventObs, worldObs, causalObs } = this.collectObservations(scene.text, sentences, registry, doc);
     if (observations.length === 0 && registryIsEmpty(registry)) {
       console.debug('[PlotContextDetector] No observations and empty registry; early exit.');
-      return { issues: [], requiresAI: false, candidates: [], stats: { observations: 0 } };
+      return { issues: [], requiresAI: false, targets: [], stats: { observations: 0 } };
     }
-
-    const { issues, candidates } = this.buildIssuesAndCandidates(scene.text, sentences, observations, registry, eventObs, worldObs, causalObs);
-
+ 
+    const { issues, targets } = this.buildIssuesAndTargets(scene.text, sentences, observations, registry, eventObs, worldObs, causalObs);
+ 
     console.debug('[PlotContextDetector] local counts:', {
       sentences: sentences.length,
       obs: observations.length,
@@ -457,27 +457,27 @@ export default class PlotContextDetector extends BaseDetector<PlotCandidate> {
       world: worldObs.length,
       causal: causalObs.length,
       issues: issues.length,
-      candidates: candidates.length,
+      targets: targets.length,
     });
-
-    const requiresAI = candidates.length > 0;
-    return { issues, requiresAI, candidates, stats: { observations: observations.length } };
+ 
+    const requiresAI = targets.length > 0;
+    return { issues, requiresAI, targets, stats: { observations: observations.length } };
   }
 
   protected async aiDetection(
     scene: Scene,
     previousScenes: readonly Scene[],
     aiManager: AIServiceManager,
-    candidates: readonly PlotCandidate[]
+    targets: readonly PlotDetectionTarget[]
   ): Promise<ContinuityIssue[]> {
-    if (!candidates || candidates.length === 0) return [];
-    const summary = (candidates[0]?.registrySummary ?? []).slice(0, 8);
-    console.debug('[PlotContextDetector] invoking AI for candidates:', candidates.length);
-
-    const req = this.buildAIRequestComplex(scene, previousScenes, candidates, summary);
+    if (!targets || targets.length === 0) return [];
+    const summary = (targets[0]?.registrySummary ?? []).slice(0, 8);
+    console.debug('[PlotContextDetector] invoking AI for targets:', targets.length);
+ 
+    const req = this.buildAIRequestComplex(scene, previousScenes, targets, summary);
     try {
       const resp = await aiManager.analyzeContinuity(req as any);
-      const mapped = this.mapAIPlotResponse(resp, candidates, scene.text, summary);
+      const mapped = this.mapAIPlotResponse(resp, targets, scene.text, summary);
       console.debug('[PlotContextDetector] AI returned plot issues:', mapped.length);
       return mapped;
     } catch (err) {
@@ -510,7 +510,7 @@ export default class PlotContextDetector extends BaseDetector<PlotCandidate> {
     return { observations: [...eventObs, ...worldObs, ...causalObs], eventObs, worldObs, causalObs };
   }
 
-  private buildIssuesAndCandidates(
+  private buildIssuesAndTargets(
     sceneText: string,
     sentences: SentenceSpan[],
     observations: PlotObservation[],
@@ -518,7 +518,7 @@ export default class PlotContextDetector extends BaseDetector<PlotCandidate> {
     eventObs: PlotObservation[],
     _worldObs: PlotObservation[],
     causalObs: PlotObservation[]
-  ): { issues: ContinuityIssue[]; candidates: PlotCandidate[] } {
+  ): { issues: ContinuityIssue[]; targets: PlotDetectionTarget[] } {
     const issues: ContinuityIssue[] = generateImmediateIssues(observations, registry);
     for (const o of causalObs) {
       const knownCausal = registry.causal.length > 0;
@@ -531,21 +531,21 @@ export default class PlotContextDetector extends BaseDetector<PlotCandidate> {
         });
       }
     }
-    const candidates = assemblePlotCandidates(observations, registry, sceneText);
-    // Opening forward refs are must-fix already; keep candidates only for ambiguous contexts
-    return { issues, candidates };
+    const targets = assemblePlotDetectionTargets(observations, registry, sceneText);
+    // Opening forward refs are must-fix already; keep detection targets only for ambiguous contexts
+    return { issues, targets };
   }
 
   // ---- AI helpers (kept small and mock-friendly) ----
   private buildAIRequestComplex(
     scene: Scene,
     previousScenes: readonly Scene[],
-    candidates: readonly PlotCandidate[],
+    targets: readonly PlotDetectionTarget[],
     registrySummary: string[]
   ) {
     const headerLines = [
-      '[[Plot continuity candidates]]',
-      ...candidates.slice(0, 6).map(c => {
+      '[[Plot detection targets]]',
+      ...targets.slice(0, 6).map(c => {
         const sent = (c.sentenceText || '').slice(0, 180);
         return `- marker:"${c.markerText}" @[${c.span[0]},${c.span[1]}] | sent:"${sent}" | cues:${c.otherCues.slice(0, 6).join(', ')}`;
       }),
@@ -554,12 +554,12 @@ export default class PlotContextDetector extends BaseDetector<PlotCandidate> {
       '[[Scene excerpts]]',
     ];
     const header = headerLines.join('\n');
-
-    // Truncate scene near first candidate (~1200 around markers)
-    const first = candidates[0]?.span ?? [0, 0];
+ 
+    // Truncate scene near first detection target (~1200 around markers)
+    const first = targets[0]?.span ?? [0, 0];
     const excerpt = contextSnippet(scene.text, first[0], first[1], 600);
     const prevExcerpt = previousScenes.length > 0 ? (previousScenes[previousScenes.length - 1].text || '').slice(0, 800) : '';
-
+ 
     const sceneForAI: Scene = { ...scene, text: `${header}\n\n${excerpt}\n\n[[Prev]]\n${prevExcerpt}` };
     const readerContext: ReaderKnowledge = {
       knownCharacters: new Set<string>(),
@@ -577,20 +577,20 @@ export default class PlotContextDetector extends BaseDetector<PlotCandidate> {
 
   private mapAIPlotResponse(
     resp: { issues?: ContinuityIssue[] } | null | undefined,
-    candidates: readonly PlotCandidate[],
+    targets: readonly PlotDetectionTarget[],
     sceneText: string,
     registrySummary: string[]
   ): ContinuityIssue[] {
-    const candKeys = new Map<string, PlotCandidate>();
-    for (const c of candidates) candKeys.set(`${c.span[0]}|${c.span[1]}`, c);
-
+    const targetKeys = new Map<string, PlotDetectionTarget>();
+    for (const c of targets) targetKeys.set(`${c.span[0]}|${c.span[1]}`, c);
+ 
     const out: ContinuityIssue[] = [];
     for (const it of resp?.issues ?? []) {
       const type = it.type ?? 'plot';
       if (type !== 'plot') continue;
       const [s, e] = it.textSpan ?? [NaN, NaN];
       if (!Number.isFinite(s) || !Number.isFinite(e) || s >= e) {
-        const c = candidates[0];
+        const c = targets[0];
         out.push({
           type: 'plot',
           severity: it.severity ?? 'should-fix',
@@ -600,7 +600,7 @@ export default class PlotContextDetector extends BaseDetector<PlotCandidate> {
         });
       } else {
         const key = `${s}|${e}`;
-        const c = candKeys.get(key);
+        const c = targetKeys.get(key);
         out.push({
           type: 'plot',
           severity: it.severity ?? 'should-fix',

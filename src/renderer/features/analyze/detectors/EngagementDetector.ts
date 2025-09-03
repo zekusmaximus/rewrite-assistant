@@ -17,7 +17,7 @@ interface PreviousSummary {
   keyTerms: string[];
 }
 
-interface EngagementCandidate {
+interface EngagementDetectionTarget {
   hookLine: string;
   firstSentences: string[];
   contextWindow: string;
@@ -125,12 +125,12 @@ export function summarizePreviousContext(previousScenes: readonly Scene[]): Prev
   return { characters, keyTerms };
 }
 
-export function buildEngagementCandidate(
+export function buildEngagementDetectionTarget(
   scene: Scene,
   previousScenes: readonly Scene[],
   stats: OpeningStats,
   sentences: readonly { start: number; end: number; text: string }[]
-): EngagementCandidate {
+): EngagementDetectionTarget {
   const hookLine = extractHookLine(scene.text || '');
   const firstSentences = sentences.slice(0, 3).map(s => s.text.trim());
   const contextWindow = (scene.text || '').slice(0, 900);
@@ -182,7 +182,7 @@ function buildReaderContextFromSummary(sum: PreviousSummary) {
   };
 }
 
-function buildAIHeader(scene: Scene, cand: EngagementCandidate): string {
+function buildAIHeader(scene: Scene, cand: EngagementDetectionTarget): string {
   const s = cand.openingStats;
   const parts: string[] = [];
   parts.push('[[Engagement assessment request]]');
@@ -200,27 +200,27 @@ function buildAIHeader(scene: Scene, cand: EngagementCandidate): string {
   return parts.join('\n');
 }
 
-export default class EngagementDetector extends BaseDetector<EngagementCandidate> {
+export default class EngagementDetector extends BaseDetector<EngagementDetectionTarget> {
   public readonly detectorType = 'engagement' as const;
 
   protected async localDetection(
     scene: Scene,
     previousScenes: readonly Scene[],
     _aiManager: AIServiceManager
-  ): Promise<LocalDetectionResult<EngagementCandidate>> {
+  ): Promise<LocalDetectionResult<EngagementDetectionTarget>> {
     if (!scene?.text || scene.text.trim().length === 0) {
-      return { issues: [], requiresAI: false, candidates: [] };
+      return { issues: [], requiresAI: false, targets: [] };
     }
     const doc = await this.safeNLP(scene.text);
     const sentences = splitSentences(scene.text);
     const stats = computeOpeningStats(scene.text, sentences, doc);
-    const cand = buildEngagementCandidate(scene, previousScenes, stats, sentences);
-    const candidates = cand.hookLine ? [cand] : [];
-    console.debug('[EngagementDetector] stats/candidate:', { stats, hasCandidate: candidates.length > 0 });
+    const target = buildEngagementDetectionTarget(scene, previousScenes, stats, sentences);
+    const targets = target.hookLine ? [target] : [];
+    console.debug('[EngagementDetector] stats/target:', { stats, hasTarget: targets.length > 0 });
     return {
       issues: [],
-      requiresAI: candidates.length > 0,
-      candidates,
+      requiresAI: targets.length > 0,
+      targets,
       stats: stats as unknown as Record<string, number>
     };
   }
@@ -229,10 +229,10 @@ export default class EngagementDetector extends BaseDetector<EngagementCandidate
     scene: Scene,
     previousScenes: readonly Scene[],
     aiManager: AIServiceManager,
-    candidates: readonly EngagementCandidate[]
+    targets: readonly EngagementDetectionTarget[]
   ): Promise<ContinuityIssue[]> {
-    if (!candidates || candidates.length === 0) return [];
-    const cand = candidates[0];
+    if (!targets || targets.length === 0) return [];
+    const cand = targets[0];
     try {
       const header = buildAIHeader(scene, cand);
       const body: string[] = [];
@@ -248,7 +248,7 @@ export default class EngagementDetector extends BaseDetector<EngagementCandidate
         analysisType: 'full' as const,
         readerContext: buildReaderContextFromSummary(cand.previousSummary)
       } as Parameters<AIServiceManager['analyzeContinuity']>[0];
-      console.debug('[EngagementDetector] invoking AI (full) for engagement assessment');
+      console.debug('[EngagementDetector] invoking AI (full) for detection targets');
       const resp = await aiManager.analyzeContinuity(req);
       const out = mapAIEngagementIssues(resp, scene.text, cand.hookLine);
       console.debug('[EngagementDetector] AI returned engagement issues:', out.length);

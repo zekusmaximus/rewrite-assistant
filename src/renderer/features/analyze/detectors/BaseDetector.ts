@@ -7,7 +7,7 @@ import AIServiceManager from '../../../../services/ai/AIServiceManager';
 export interface LocalDetectionResult<T = unknown> {
   issues: ContinuityIssue[];
   requiresAI: boolean;
-  candidates: readonly T[];
+  targets: readonly T[];
   stats?: Record<string, number>;
 }
 
@@ -15,7 +15,7 @@ export interface LocalDetectionResult<T = unknown> {
  * Abstract base class for all continuity detectors.
  * Handles orchestration between local (rule/NLP) pass and optional AI pass.
  */
-export default abstract class BaseDetector<TCandidate = unknown> {
+export default abstract class BaseDetector<TTarget = unknown> {
   public abstract readonly detectorType:
     | 'pronoun'
     | 'timeline'
@@ -41,7 +41,7 @@ export default abstract class BaseDetector<TCandidate = unknown> {
       }
 
       try {
-        const aiIssues = await this.aiDetection(scene, previousScenes, aiManager, local.candidates ?? []);
+        const aiIssues = await this.aiDetection(scene, previousScenes, aiManager, local.targets ?? []);
         const merged = this.mergeResults(baseIssues, aiIssues);
         console.debug(
           `[${this.constructor.name}] AI-enriched detection complete: local=${baseIssues.length}, ai=${aiIssues.length}, merged=${merged.length}`
@@ -65,17 +65,17 @@ export default abstract class BaseDetector<TCandidate = unknown> {
     scene: Scene,
     previousScenes: readonly Scene[],
     aiManager: AIServiceManager
-  ): Promise<LocalDetectionResult<TCandidate>>;
+  ): Promise<LocalDetectionResult<TTarget>>;
 
   /**
    * Optional AI enrichment step, only called if localDetection.requiresAI === true.
-   * May consult the AIServiceManager to analyze candidates and produce additional issues.
+   * May consult the AIServiceManager to analyze detection targets and produce additional issues.
    */
   protected abstract aiDetection(
     scene: Scene,
     previousScenes: readonly Scene[],
     aiManager: AIServiceManager,
-    candidates: readonly TCandidate[]
+    targets: readonly TTarget[]
   ): Promise<ContinuityIssue[]>;
 
   /**

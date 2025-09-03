@@ -38,7 +38,7 @@ export interface PreviousTimelineRegistry {
   hasMeanwhile: boolean;
 }
 
-export interface TimelineCandidate {
+export interface TimelineDetectionTarget {
   markerText: string;
   sentenceText: string;
   context: string;
@@ -299,18 +299,18 @@ export function buildPreviousTimelineRegistry(previousScenes: readonly Scene[]):
   };
 }
 
-// ---------- Candidate assembly (exported) ----------
-export function assembleTimelineCandidates(
+// ---------- Detection target assembly (exported) ----------
+export function assembleTimelineDetectionTargets(
   markers: readonly BasicMarker[],
   sceneText: string,
   sentences: readonly SentenceSpan[],
   reg: PreviousTimelineRegistry
-): TimelineCandidate[] {
+): TimelineDetectionTarget[] {
   const lowMarkers = markers.map(m => ({ ...m, low: m.text.toLowerCase() }));
   const otherTexts = (skipIdx: number) =>
     lowMarkers.filter((_, i) => i !== skipIdx).slice(0, 6).map(mm => mm.text);
 
-  const cands: TimelineCandidate[] = [];
+  const targets: TimelineDetectionTarget[] = [];
   const hasMeanwhile = lowMarkers.some(m => m.low.includes('meanwhile') || m.low.includes('at the same time'));
   const relativeCount = lowMarkers.filter(m => /\b(day|week|month|year|morning|night|yesterday|tomorrow|earlier|later)\b/.test(m.low)).length;
 
@@ -329,7 +329,7 @@ export function assembleTimelineCandidates(
     if (!triggers) continue;
 
     const sent = sentences[m.sentenceIndex]?.text ?? '';
-    cands.push({
+    targets.push({
       markerText: m.text,
       sentenceText: sent,
       context: snippet(sceneText, m.start, m.end),
@@ -345,7 +345,7 @@ export function assembleTimelineCandidates(
       sentenceIndex: m.sentenceIndex,
     });
   }
-  return cands;
+  return targets;
 }
 
 // ---------- Local conflict detection ----------
@@ -448,11 +448,11 @@ function buildReaderContextMinimal(): ReaderKnowledge {
   };
 }
 
-function buildAIHeader(scene: Scene, cands: readonly TimelineCandidate[], reg: PreviousTimelineRegistry): string {
+function buildAIHeader(scene: Scene, targets: readonly TimelineDetectionTarget[], reg: PreviousTimelineRegistry): string {
   const lines: string[] = [];
-  lines.push('[[Timeline candidates]]');
+  lines.push('[[Timeline detection targets]]');
   lines.push(`scene: id=${scene.id} pos=${scene.position}`);
-  for (const c of cands.slice(0, 8)) {
+  for (const c of targets.slice(0, 8)) {
     const sent = (c.sentenceText || '').slice(0, 140).replace(/\n+/g, ' ');
     const others = c.otherMarkers.slice(0, 6).join(' | ') || 'none';
     lines.push(`- marker="${c.markerText}" span=[${c.start},${c.end}] sent="${sent}" localMarkers=[${others}]`);
@@ -465,10 +465,10 @@ function buildAIHeader(scene: Scene, cands: readonly TimelineCandidate[], reg: P
   return lines.join('\n');
 }
 
-function buildSceneExcerptAroundCandidates(text: string, cands: readonly TimelineCandidate[], maxLen = 1200): string {
-  if (!cands.length) return text.slice(0, maxLen);
+function buildSceneExcerptAroundTargets(text: string, targets: readonly TimelineDetectionTarget[], maxLen = 1200): string {
+  if (!targets.length) return text.slice(0, maxLen);
   const parts: string[] = [];
-  for (const c of cands) {
+  for (const c of targets) {
     parts.push(snippet(text, c.start, c.end, 220));
     const len = parts.join('\n---\n').length;
     if (len > maxLen) break;
@@ -479,12 +479,12 @@ function buildSceneExcerptAroundCandidates(text: string, cands: readonly Timelin
 function mapAITimelineIssues(
   resp: { issues?: ContinuityIssue[] } | null | undefined,
   sceneText: string,
-  cands: readonly TimelineCandidate[]
+  targets: readonly TimelineDetectionTarget[]
 ): ContinuityIssue[] {
   const out: ContinuityIssue[] = [];
-  const byMarker = new Map<string, TimelineCandidate>();
-  for (const c of cands) byMarker.set(c.markerText.toLowerCase(), c);
-
+  const byMarker = new Map<string, TimelineDetectionTarget>();
+  for (const c of targets) byMarker.set(c.markerText.toLowerCase(), c);
+ 
   for (const it of resp?.issues ?? []) {
     if ((it.type ?? 'timeline') !== 'timeline') continue;
     const hasSpan = Array.isArray(it.textSpan) && Number.isFinite(it.textSpan[0]) && Number.isFinite(it.textSpan[1]);
@@ -498,11 +498,11 @@ function mapAITimelineIssues(
       });
       continue;
     }
-    // Fallback to closest candidate by marker mention
+    // Fallback to closest detection target by marker mention
     const key = (it.description ?? '').toLowerCase();
-    let chosen: TimelineCandidate | undefined;
+    let chosen: TimelineDetectionTarget | undefined;
     for (const [mk, c] of byMarker) { if (key.includes(mk)) { chosen = c; break; } }
-    chosen ??= cands[0];
+    chosen ??= targets[0];
     const span: [number, number] = chosen ? [chosen.start, chosen.end] : [0, Math.min(1, sceneText.length)];
     out.push({
       type: 'timeline',
@@ -516,56 +516,56 @@ function mapAITimelineIssues(
 }
 
 // ---------- Detector implementation ----------
-export default class TimelineDetector extends BaseDetector<TimelineCandidate> {
+export default class TimelineDetector extends BaseDetector<TimelineDetectionTarget> {
   public readonly detectorType = 'timeline' as const;
 
   protected async localDetection(
     scene: Scene,
     previousScenes: readonly Scene[],
     _aiManager: AIServiceManager
-  ): Promise<LocalDetectionResult<TimelineCandidate>> {
+  ): Promise<LocalDetectionResult<TimelineDetectionTarget>> {
     if (!scene?.text || typeof scene.text !== 'string' || scene.text.trim().length === 0) {
-      return { issues: [], requiresAI: false, candidates: [] };
+      return { issues: [], requiresAI: false, targets: [] };
     }
-
+ 
     const doc = await this.safeNLP(scene.text);
     if (!doc) console.debug('[TimelineDetector] compromise not available, using regex-only fallback.');
     const sentences = splitSentences(scene.text);
     const extracted = extractTemporalMarkers(scene.text, doc);
     const basicMarkers = extracted.markers;
     const reg = getOrBuildRegistry(previousScenes);
-
+ 
     if (basicMarkers.length === 0 && reg.seasons.size === 0 && reg.months.size === 0 && reg.lastDayOffset === null) {
       console.debug('[TimelineDetector] Fast path: no markers and empty registry.');
-      return { issues: [], requiresAI: false, candidates: [] };
+      return { issues: [], requiresAI: false, targets: [] };
     }
-
+ 
     const issues = detectTimelineIssues(basicMarkers, reg, scene.text);
-    const candidates = assembleTimelineCandidates(basicMarkers, scene.text, sentences, reg);
-
+    const targets = assembleTimelineDetectionTargets(basicMarkers, scene.text, sentences, reg);
+ 
     console.debug(
       '[TimelineDetector] markers:',
       basicMarkers.length,
       'issues:',
       issues.length,
-      'cands:',
-      candidates.length,
+      'targets:',
+      targets.length,
       'reg[lastAnchor,lastDayOffset,seasons,months]:',
       reg.lastAnchor,
       reg.lastDayOffset,
       Array.from(reg.seasons).join(','),
       Array.from(reg.months).join(',')
     );
-
+ 
     return {
       issues,
-      requiresAI: candidates.length > 0,
-      candidates,
+      requiresAI: targets.length > 0,
+      targets,
       stats: {
         markers: basicMarkers.length,
         seasonsCurrent: seasonBucketSet(basicMarkers).size,
         hasMeanwhilePrev: reg.hasMeanwhile ? 1 : 0,
-        candidates: candidates.length,
+        targets: targets.length,
       },
     };
   }
@@ -574,25 +574,25 @@ export default class TimelineDetector extends BaseDetector<TimelineCandidate> {
     scene: Scene,
     previousScenes: readonly Scene[],
     aiManager: AIServiceManager,
-    candidates: readonly TimelineCandidate[]
+    targets: readonly TimelineDetectionTarget[]
   ): Promise<ContinuityIssue[]> {
-    if (!candidates || candidates.length === 0) return [];
+    if (!targets || targets.length === 0) return [];
     try {
       const reg = getOrBuildRegistry(previousScenes);
-      const header = buildAIHeader(scene, candidates, reg);
-      const excerpt = buildSceneExcerptAroundCandidates(scene.text, candidates, 1200);
+      const header = buildAIHeader(scene, targets, reg);
+      const excerpt = buildSceneExcerptAroundTargets(scene.text, targets, 1200);
       const prevExcerpt = previousScenes.length ? [{ ...previousScenes[previousScenes.length - 1], text: (previousScenes[previousScenes.length - 1].text ?? '').slice(0, 700) }] : [];
-
+ 
       const req = {
         scene: { ...scene, text: `${header}\n\n${excerpt}` },
         previousScenes: prevExcerpt as Scene[],
         analysisType: 'consistency' as const,
         readerContext: buildReaderContextMinimal(),
       } as Parameters<AIServiceManager['analyzeContinuity']>[0];
-
-      console.debug('[TimelineDetector] invoking AI (consistency) for candidates:', candidates.length);
+ 
+      console.debug('[TimelineDetector] invoking AI (consistency) for targets:', targets.length);
       const resp = await aiManager.analyzeContinuity(req);
-      const out = mapAITimelineIssues(resp, scene.text, candidates);
+      const out = mapAITimelineIssues(resp, scene.text, targets);
       console.debug('[TimelineDetector] AI returned timeline issues:', out.length);
       return out;
     } catch (err) {

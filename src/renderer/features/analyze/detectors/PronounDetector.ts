@@ -22,7 +22,7 @@ export interface PronounInstance {
   sentenceIndex: number;
 }
 
-export interface PronounCandidate {
+export interface PronounDetectionTarget {
   pronoun: string;
   sentenceText: string;
   context: string;
@@ -168,22 +168,22 @@ export function collectPronounHints(nlpDoc: any): string[] {
   return [];
 }
 
-// Aggregate local issues/candidates
+// Aggregate local issues/targets
 export function analyzeLocalPronouns(
   sceneText: string,
   sentences: SentenceInfo[],
   pronouns: PronounInstance[],
   currentPeople: string[],
   previousPeople: string[]
-): { issues: ContinuityIssue[]; candidates: PronounCandidate[] } {
+): { issues: ContinuityIssue[]; targets: PronounDetectionTarget[] } {
   const issues: ContinuityIssue[] = [];
-  const candidates: PronounCandidate[] = [];
+  const targets: PronounDetectionTarget[] = [];
   for (const p of pronouns) {
     const res = assessPronounInstance(p, sceneText, sentences, currentPeople, previousPeople);
     if (res.issues.length) issues.push(...res.issues);
-    if (res.candidate) candidates.push(res.candidate);
+    if (res.target) targets.push(res.target);
   }
-  return { issues, candidates };
+  return { issues, targets };
 }
 
 // Per-pronoun assessment
@@ -193,7 +193,7 @@ export function assessPronounInstance(
   sentences: SentenceInfo[],
   currentPeople: string[],
   previousPeople: string[]
-): { issues: ContinuityIssue[]; candidate?: PronounCandidate } {
+): { issues: ContinuityIssue[]; target?: PronounDetectionTarget } {
   const issues: ContinuityIssue[] = [];
   const isOpening = p.sentenceIndex === 0;
   const tokenIdx = tokenIndexAtOffset(sceneText, p.start);
@@ -227,7 +227,7 @@ export function assessPronounInstance(
     const si = Math.max(0, Math.min(p.sentenceIndex, sentences.length - 1));
     return {
       issues,
-      candidate: {
+      target: {
         pronoun: p.pronoun,
         sentenceText: sentences[si]?.text ?? '',
         context: contextSnippet(sceneText, p.start, p.end),
@@ -248,11 +248,11 @@ export function assembleKnownPeople(previousScenes: readonly Scene[], sceneText:
   return dedupeNormalize([...previousPeople, ...currentPeople]);
 }
 
-// Compose compact AI scene text including candidates (bounded)
-export function buildAIText(original: string, candidates: readonly PronounCandidate[], maxCands = 6): string {
-  const chosen = candidates.slice(0, maxCands);
+// Compose compact AI scene text including detection targets (bounded)
+export function buildAIText(original: string, targets: readonly PronounDetectionTarget[], maxTargets = 6): string {
+  const chosen = targets.slice(0, maxTargets);
   const headerLines = [
-    '[[Pronoun continuity candidates]]',
+    '[[Pronoun detection targets]]',
     ...chosen.map(c => {
       const ant = c.antecedents.slice(0, 6).join(', ') || 'none';
       const sent = (c.sentenceText || '').slice(0, 160);
@@ -264,14 +264,14 @@ export function buildAIText(original: string, candidates: readonly PronounCandid
   return `${header}\n\n${original}`;
 }
 
-// Build AI request with candidate summary embedded into scene.text
+// Build AI request with detection target summary embedded into scene.text
 export function buildAIRequest(
   scene: Scene,
   prevForAI: readonly Scene[],
-  candidates: readonly PronounCandidate[],
+  targets: readonly PronounDetectionTarget[],
   known: readonly string[]
 ) {
-  const sceneForAI: Scene = { ...scene, text: buildAIText(scene.text, candidates) };
+  const sceneForAI: Scene = { ...scene, text: buildAIText(scene.text, targets) };
   return {
     scene: sceneForAI,
     previousScenes: prevForAI as Scene[],
@@ -280,13 +280,13 @@ export function buildAIRequest(
   };
 }
 
-// Map AI response back to ContinuityIssue[], filtered to known candidates when spans are present
+// Map AI response back to ContinuityIssue[], filtered to known targets when spans are present
 export function mapAIResponseToIssues(
   resp: { issues?: ContinuityIssue[] } | null | undefined,
   sceneText: string,
-  candidates: readonly PronounCandidate[]
+  targets: readonly PronounDetectionTarget[]
 ): ContinuityIssue[] {
-  const candKeys = new Set(candidates.map(c => `${c.span[0]}|${c.span[1]}`));
+  const targetKeys = new Set(targets.map(c => `${c.span[0]}|${c.span[1]}`));
   const out: ContinuityIssue[] = [];
   for (const it of resp?.issues ?? []) {
     const type = it.type ?? 'pronoun';
@@ -300,7 +300,7 @@ export function mapAIResponseToIssues(
         textSpan: it.textSpan ?? [0, Math.min(1, sceneText.length)],
         suggestedFix: it.suggestedFix,
       });
-    } else if (candKeys.has(`${s}|${e}`)) {
+    } else if (targetKeys.has(`${s}|${e}`)) {
       out.push({
         type: 'pronoun',
         severity: it.severity ?? 'should-fix',
@@ -314,16 +314,16 @@ export function mapAIResponseToIssues(
 }
 
 // ---------- Detector implementation ----------
-export default class PronounDetector extends BaseDetector<PronounCandidate> {
+export default class PronounDetector extends BaseDetector<PronounDetectionTarget> {
   public readonly detectorType = 'pronoun' as const;
 
   protected async localDetection(
     scene: Scene,
     previousScenes: readonly Scene[],
     _aiManager: AIServiceManager
-  ): Promise<LocalDetectionResult<PronounCandidate>> {
+  ): Promise<LocalDetectionResult<PronounDetectionTarget>> {
     if (!scene?.text || typeof scene.text !== 'string' || scene.text.trim().length === 0) {
-      return { issues: [], requiresAI: false, candidates: [] };
+      return { issues: [], requiresAI: false, targets: [] };
     }
 
     const doc = await this.safeNLP(scene.text);
@@ -336,7 +336,7 @@ export default class PronounDetector extends BaseDetector<PronounCandidate> {
     const hints = doc ? collectPronounHints(doc) : [];
     console.debug('[PronounDetector] pronouns found:', pronouns.length, 'compromise hints:', hints.length);
 
-    const { issues, candidates } = analyzeLocalPronouns(
+    const { issues, targets } = analyzeLocalPronouns(
       scene.text,
       sentences,
       pronouns,
@@ -344,11 +344,11 @@ export default class PronounDetector extends BaseDetector<PronounCandidate> {
       previousPeople
     );
 
-    console.debug('[PronounDetector] local issues:', issues.length, 'candidates:', candidates.length);
+    console.debug('[PronounDetector] local issues:', issues.length, 'targets:', targets.length);
     return {
       issues,
-      requiresAI: candidates.length > 0,
-      candidates,
+      requiresAI: targets.length > 0,
+      targets,
       stats: { pronouns: pronouns.length },
     };
   }
@@ -357,18 +357,18 @@ export default class PronounDetector extends BaseDetector<PronounCandidate> {
     scene: Scene,
     previousScenes: readonly Scene[],
     aiManager: AIServiceManager,
-    candidates: readonly PronounCandidate[]
+    targets: readonly PronounDetectionTarget[]
   ): Promise<ContinuityIssue[]> {
-    if (!candidates || candidates.length === 0) return [];
+    if (!targets || targets.length === 0) return [];
 
     const known = assembleKnownPeople(previousScenes, scene.text);
     const prevForAI = previousScenes.slice(-2).map(s => ({ ...s, text: s.text?.slice(0, 600) ?? '' }));
 
-    console.debug('[PronounDetector] invoking AI for candidates:', candidates.length);
-    const req = buildAIRequest(scene, prevForAI, candidates, known);
+    console.debug('[PronounDetector] invoking AI for targets:', targets.length);
+    const req = buildAIRequest(scene, prevForAI, targets, known);
     const resp = await this.aiAnalyzeSimple(aiManager, req);
 
-    const out = mapAIResponseToIssues(resp, scene.text, candidates);
+    const out = mapAIResponseToIssues(resp, scene.text, targets);
     console.debug('[PronounDetector] AI returned pronoun issues:', out.length);
     return out;
   }
