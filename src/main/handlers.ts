@@ -3,7 +3,61 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { mainWindow } from './index';
 import { IPC_CHANNELS, SUPPORTED_FILE_TYPES, DEFAULT_MANUSCRIPT_FILE } from '../shared/constants';
-import { Manuscript, Scene } from '../shared/types';
+import { Manuscript, Scene, ReaderKnowledge } from '../shared/types';
+import AIServiceManager from '../services/ai/AIServiceManager';
+import type { AnalysisRequest, AnalysisType, ClaudeConfig, OpenAIConfig, GeminiConfig } from '../services/ai/types';
+ 
+// AI service manager singleton and helpers
+/**
+ * Create a single app-wide AIServiceManager instance for provider usage, caching, and metrics.
+ */
+const aiManager = new AIServiceManager();
+
+/**
+ * Normalize ReaderKnowledge from IPC-safe payloads into the strict Set-based structure.
+ * - If knownCharacters is an array, convert to Set<string>.
+ * - If it's already a Set, leave as-is.
+ * - Other fields fall back to empty arrays when absent.
+ */
+function normalizeReaderKnowledge(raw: unknown): ReaderKnowledge {
+  const fallback: ReaderKnowledge = {
+    knownCharacters: new Set<string>(),
+    establishedTimeline: [],
+    revealedPlotPoints: [],
+    establishedSettings: [],
+  };
+  if (!raw || typeof raw !== 'object') return fallback;
+  const obj = raw as Record<string, unknown>;
+
+  const known = (obj as any).knownCharacters;
+  let knownSet: Set<string>;
+  if (known instanceof Set) {
+    knownSet = known;
+  } else if (Array.isArray(known)) {
+    knownSet = new Set<string>(known.filter((s: unknown) => typeof s === 'string'));
+  } else {
+    knownSet = new Set<string>();
+  }
+
+  return {
+    knownCharacters: knownSet,
+    establishedTimeline: Array.isArray((obj as any).establishedTimeline) ? (obj as any).establishedTimeline : [],
+    revealedPlotPoints: Array.isArray((obj as any).revealedPlotPoints) ? (obj as any).revealedPlotPoints : [],
+    establishedSettings: Array.isArray((obj as any).establishedSettings) ? (obj as any).establishedSettings : [],
+  };
+}
+
+/**
+ * Build a standardized error response with a stable shape for IPC handlers.
+ */
+function toErrorResponse(
+  err: unknown,
+  code: string
+): { ok: false; error: { message: string; code: string } } {
+  const message =
+    err instanceof Error ? err.message : typeof err === 'string' ? err : 'Unknown error';
+  return { ok: false as const, error: { message: String(message), code } };
+}
 
 // Scene parsing utility
 function parseManuscriptIntoScenes(content: string, filePath: string): Manuscript {
@@ -225,6 +279,92 @@ export function setupIPCHandlers(): void {
       console.error('Error saving file:', error);
       throw error;
     }
+  // AI: Configure providers (Anthropic/OpenAI/Gemini)
+  ipcMain.handle(IPC_CHANNELS.CONFIGURE_AI_PROVIDER, async (event: any, payload: any) => {
+    try {
+      const cfg: { claude?: ClaudeConfig; openai?: OpenAIConfig; gemini?: GeminiConfig } = {};
+      if (payload && typeof payload === 'object') {
+        const p = payload as Record<string, any>;
+
+        if (p.claude !== undefined) {
+          if (p.claude && typeof p.claude.apiKey === 'string' && p.claude.apiKey.trim().length > 0) {
+            cfg.claude = p.claude as ClaudeConfig;
+          } else {
+            console.warn('[IPC][CONFIGURE_AI_PROVIDER] Invalid claude.apiKey');
+            return toErrorResponse('Invalid claude.apiKey', 'CONFIGURE_FAILED');
+          }
+        }
+
+        if (p.openai !== undefined) {
+          if (p.openai && typeof p.openai.apiKey === 'string' && p.openai.apiKey.trim().length > 0) {
+            cfg.openai = p.openai as OpenAIConfig;
+          } else {
+            console.warn('[IPC][CONFIGURE_AI_PROVIDER] Invalid openai.apiKey');
+            return toErrorResponse('Invalid openai.apiKey', 'CONFIGURE_FAILED');
+          }
+        }
+
+        if (p.gemini !== undefined) {
+          if (p.gemini && typeof p.gemini.apiKey === 'string' && p.gemini.apiKey.trim().length > 0) {
+            cfg.gemini = p.gemini as GeminiConfig;
+          } else {
+            console.warn('[IPC][CONFIGURE_AI_PROVIDER] Invalid gemini.apiKey');
+            return toErrorResponse('Invalid gemini.apiKey', 'CONFIGURE_FAILED');
+          }
+        }
+      }
+
+      aiManager.configure(cfg);
+      console.log('[IPC][CONFIGURE_AI_PROVIDER] Providers configured:', Object.keys(cfg));
+      return { ok: true };
+    } catch (err) {
+      console.warn('[IPC][CONFIGURE_AI_PROVIDER] configure failed:', err);
+      return toErrorResponse(err, 'CONFIGURE_FAILED');
+    }
+  });
+
+  // AI: Analyze continuity
+  ipcMain.handle(IPC_CHANNELS.ANALYZE_CONTINUITY, async (event: any, payload: any) => {
+    try {
+      if (!payload || typeof payload !== 'object') {
+        return toErrorResponse('Invalid payload', 'ANALYZE_FAILED');
+      }
+      const p = payload as Record<string, any>;
+      const scene = p.scene;
+      const previousScenes = Array.isArray(p.previousScenes) ? (p.previousScenes as Scene[]) : [];
+      const analysisType = p.analysisType as AnalysisType;
+      const allowed: AnalysisType[] = ['simple', 'consistency', 'complex', 'full'];
+
+      if (!scene || typeof scene.text !== 'string') {
+        console.warn('[IPC][ANALYZE_CONTINUITY] Invalid scene payload');
+        return toErrorResponse('Invalid scene', 'ANALYZE_FAILED');
+      }
+      if (!allowed.includes(analysisType)) {
+        console.warn('[IPC][ANALYZE_CONTINUITY] Invalid analysisType:', analysisType);
+        return toErrorResponse('Invalid analysisType', 'ANALYZE_FAILED');
+      }
+
+      const readerContext = normalizeReaderKnowledge(p.readerContext);
+      const req: AnalysisRequest = { scene, previousScenes, analysisType, readerContext };
+
+      const res = await aiManager.analyzeContinuity(req);
+      return res;
+    } catch (err) {
+      console.warn('[IPC][ANALYZE_CONTINUITY] analyze failed:', err);
+      const base = toErrorResponse(err, 'ANALYZE_FAILED');
+      return { ...base, metadata: { providerState: aiManager.getMetrics().lastErrors } };
+    }
+  });
+
+  // AI: Get analysis/metrics status
+  ipcMain.handle(IPC_CHANNELS.GET_ANALYSIS_STATUS, async () => {
+    try {
+      return aiManager.getMetrics();
+    } catch (err) {
+      console.warn('[IPC][GET_ANALYSIS_STATUS] metrics failed:', err);
+      return toErrorResponse(err, 'STATUS_FAILED');
+    }
+  });
   });
 }
 

@@ -30,6 +30,10 @@ export const IPC_CHANNELS = {
   SAVE_FILE: 'save-file',
   FILE_LOADED: 'file-loaded',
   FILE_SAVED: 'file-saved',
+  // AI service channels
+  ANALYZE_CONTINUITY: 'analyze-continuity',
+  CONFIGURE_AI_PROVIDER: 'configure-ai-provider',
+  GET_ANALYSIS_STATUS: 'get-analysis-status',
   ERROR: 'error'
 };
 
