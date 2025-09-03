@@ -34,7 +34,11 @@ export const IPC_CHANNELS = {
   ANALYZE_CONTINUITY: 'analyze-continuity',
   CONFIGURE_AI_PROVIDER: 'configure-ai-provider',
   GET_ANALYSIS_STATUS: 'get-analysis-status',
-  ERROR: 'error'
+  ERROR: 'error',
+  // Cache management channels
+  GET_CACHE_STATS: 'cache:get_stats',
+  CLEAR_ANALYSIS_CACHE: 'cache:clear_analysis_cache',
+  WARM_CACHE: 'cache:warm'
 };
 
 // Default manuscript file name

@@ -1,5 +1,6 @@
 import type { Scene, ContinuityIssue, ContinuityAnalysis, ReaderKnowledge } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
+import AnalysisCache from '../../../../services/cache/AnalysisCache';
 import BaseDetector from '../detectors/BaseDetector';
 import PronounDetector from '../detectors/PronounDetector';
 import TimelineDetector from '../detectors/TimelineDetector';
@@ -148,6 +149,14 @@ export default class ContinuityAnalyzer {
   private readonly plot = new PlotContextDetector();
   private readonly engagement = new EngagementDetector();
   private readonly aggregator = new IssueAggregator();
+  private analysisCache?: AnalysisCache;
+
+  constructor(options?: { enableCache: boolean }) {
+    if (options?.enableCache) {
+      // Lazy cache creation; async init deferred until first use
+      this.analysisCache = new AnalysisCache();
+    }
+  }
 
   public async analyzeScene(
     scene: Scene,
@@ -157,8 +166,40 @@ export default class ContinuityAnalyzer {
   ): Promise<ContinuityAnalysis> {
     this.ensureValidOptions(options);
     const prev: readonly Scene[] = Array.isArray(previousScenes) ? previousScenes : [];
+    const prevArr: Scene[] = [...prev] as Scene[];
     if (!scene?.text || typeof scene.text !== 'string' || scene.text.trim().length === 0) {
       return this.buildEmptyResult(scene?.id ?? 'unknown');
+    }
+
+    // Cache: lazy init and try to return early on hit
+    if (this.analysisCache) {
+      await this.ensureCacheInit(); // Lazy cache initialization
+      try {
+        // Position fallback: prefer scene.position; else scene.index; else previousScenes.length
+        const positionForGet: number =
+          typeof (scene as any)?.position === 'number'
+            ? (scene as any).position
+            : typeof (scene as any)?.index === 'number'
+            ? (scene as any).index
+            : prevArr.length; // fallback to number of previous scenes
+
+        // Reader context fallback: use provided, otherwise empty typed object
+        const readerContextForGet: ReaderKnowledge =
+          ((options as any)?.readerContext as ReaderKnowledge) ??
+          {
+            knownCharacters: new Set<string>(),
+            establishedTimeline: [],
+            revealedPlotPoints: [],
+            establishedSettings: [],
+          };
+
+        const cached = await this.analysisCache.get(scene, positionForGet, prevArr, readerContextForGet);
+        if (cached) {
+          return cached;
+        }
+      } catch (err) {
+        console.debug('[ContinuityAnalyzer] cache.get failed; proceeding without cache.', err);
+      }
     }
 
     const started = Date.now();
@@ -174,6 +215,33 @@ export default class ContinuityAnalyzer {
 
     const result = this.buildBaseResult();
     this.attachMeta(result, scene.id, detectors.map(d => d.key), perDetector, durations, totalMs);
+
+    // After successful analysis, best-effort write to cache
+    if (this.analysisCache) {
+      try {
+        // Recompute position and reader context deterministically for cache set
+        const positionForSet: number =
+          typeof (scene as any)?.position === 'number'
+            ? (scene as any).position
+            : typeof (scene as any)?.index === 'number'
+            ? (scene as any).index
+            : prevArr.length; // fallback to number of previous scenes
+
+        const readerContextForSet: ReaderKnowledge =
+          ((options as any)?.readerContext as ReaderKnowledge) ??
+          {
+            knownCharacters: new Set<string>(),
+            establishedTimeline: [],
+            revealedPlotPoints: [],
+            establishedSettings: [],
+          };
+
+        await this.analysisCache.set(scene, positionForSet, prevArr, readerContextForSet, result, totalMs);
+      } catch (err) {
+        console.debug('[ContinuityAnalyzer] cache.set failed; ignoring.', err);
+      }
+    }
+
     return result;
   }
 
@@ -186,6 +254,14 @@ export default class ContinuityAnalyzer {
     ];
     if (includeEngagement) list.push({ key: 'engagement', instance: this.engagement });
     return list;
+  }
+
+  // Lazy cache initialization; idempotent
+  private async ensureCacheInit(): Promise<void> {
+    if (!this.analysisCache) return;
+    if ((this as any)._cacheInitialized) return;
+    await this.analysisCache.init();
+    (this as any)._cacheInitialized = true;
   }
 
   private ensureValidOptions(opts: { readonly includeEngagement: boolean }): void {

@@ -6,12 +6,26 @@ import { IPC_CHANNELS, SUPPORTED_FILE_TYPES, DEFAULT_MANUSCRIPT_FILE } from '../
 import { Manuscript, Scene, ReaderKnowledge } from '../shared/types';
 import AIServiceManager from '../services/ai/AIServiceManager';
 import type { AnalysisRequest, AnalysisType, ClaudeConfig, OpenAIConfig, GeminiConfig } from '../services/ai/types';
+import AnalysisCache from '../services/cache/AnalysisCache';
  
 // AI service manager singleton and helpers
 /**
  * Create a single app-wide AIServiceManager instance for provider usage, caching, and metrics.
  */
 const aiManager = new AIServiceManager();
+
+// Cache singleton for analysis results (lazy init)
+const analysisCache = new AnalysisCache();
+let cacheInitialized = false;
+async function ensureCacheInit(): Promise<void> {
+  if (cacheInitialized) return;
+  try {
+    await analysisCache.init();
+    cacheInitialized = true;
+  } catch {
+    // swallow
+  }
+}
 
 /**
  * Normalize ReaderKnowledge from IPC-safe payloads into the strict Set-based structure.
@@ -365,6 +379,23 @@ export function setupIPCHandlers(): void {
       return toErrorResponse(err, 'STATUS_FAILED');
     }
   });
+
+  // Cache management: stats, clear, warm
+  ipcMain.handle(IPC_CHANNELS.GET_CACHE_STATS, async () => {
+    try { await ensureCacheInit(); } catch {}
+    try { return analysisCache.getStats(); } catch { return { hitRate: 0, size: 0, totalHits: 0, totalMisses: 0, avgHitTime: 0, avgGenerationTime: 0 }; }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CLEAR_ANALYSIS_CACHE, async () => {
+    try { await ensureCacheInit(); } catch {}
+    try { await analysisCache.clear(); return true; } catch { return false; }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WARM_CACHE, async (_event, scenes: Scene[] = []) => {
+    try { await ensureCacheInit(); } catch {}
+    try { await analysisCache.warmCache(Array.isArray(scenes) ? scenes : []); return true; } catch { return false; }
+  });
+
   });
 }
-
+ 
