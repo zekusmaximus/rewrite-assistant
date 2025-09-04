@@ -1,9 +1,12 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useManuscriptStore } from '../stores/manuscriptStore';
 import SceneReorderer from '../features/reorder/SceneReorderer';
-import SceneViewer from '../components/SceneViewer';
+import SceneViewer, { type SceneViewerHandle } from '../components/SceneViewer';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
+import IssuePanel from '../features/analyze/components/IssuePanel';
+import useAnalysis from '../features/analyze/hooks/useAnalysis';
+import type { ContinuityIssue } from '../../shared/types';
 
 const App: React.FC = () => {
   const { 
@@ -19,6 +22,11 @@ const App: React.FC = () => {
     canUndo,
     canRedo
   } = useManuscriptStore();
+
+  // Local Issues panel state and analysis hook
+  const [issuesOpen, setIssuesOpen] = useState(false);
+  const sceneViewerRef = useRef<SceneViewerHandle | null>(null);
+  const { analyzeMovedScenes } = useAnalysis();
 
   // Auto-load manuscript.txt on startup
   useEffect(() => {
@@ -68,6 +76,32 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [undoReorder, redoReorder]);
 
+  // Analysis / Issues panel shortcuts
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+
+      // Ctrl/Cmd + Shift + A => Open panel and analyze moved scenes
+      if (isCtrlOrCmd && event.shiftKey && key === 'a') {
+        event.preventDefault();
+        setIssuesOpen(true);
+        void analyzeMovedScenes();
+        return;
+      }
+
+      // Escape => Close Issues panel only
+      if (key === 'escape' && issuesOpen) {
+        event.preventDefault();
+        setIssuesOpen(false);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [analyzeMovedScenes, issuesOpen]);
+
   const handleLoadFile = async () => {
     try {
       setLoading(true);
@@ -106,6 +140,16 @@ const App: React.FC = () => {
 
   const handleNewFile = () => {
     clearManuscript();
+  };
+
+  // Jump from IssuePanel to a specific issue inside the SceneViewer
+  const handleShowInScene = (sceneId: string, issue: ContinuityIssue) => {
+    // Ensure correct scene is selected before scrolling
+    useManuscriptStore.getState().selectScene(sceneId);
+    // Defer to allow SceneViewer to render highlights
+    setTimeout(() => {
+      sceneViewerRef.current?.scrollToIssue(sceneId, issue);
+    }, 0);
   };
 
   if (isLoading) {
@@ -159,6 +203,16 @@ const App: React.FC = () => {
                 >
                   Save
                 </button>
+                <button
+                  onClick={async () => {
+                    setIssuesOpen(true);
+                    await analyzeMovedScenes();
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  title="Find Issues (Ctrl+Shift+A)"
+                >
+                  🔍 Find Issues
+                </button>
               </>
             )}
           </div>
@@ -196,7 +250,7 @@ const App: React.FC = () => {
 
             {/* Scene Content (Right Panel) */}
             <div className="w-1/2 bg-white">
-              <SceneViewer />
+              <SceneViewer ref={sceneViewerRef} />
             </div>
           </>
         ) : (
@@ -224,6 +278,17 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Issues Bottom Panel (collapsible) */}
+      {issuesOpen && (
+        <div className="border-t border-gray-200 bg-white px-4 py-3">
+          <IssuePanel
+            isOpen={issuesOpen}
+            onClose={() => setIssuesOpen(false)}
+            onShowInScene={(sceneId, issue) => handleShowInScene(sceneId, issue)}
+          />
+        </div>
+      )}
     </div>
   );
 };

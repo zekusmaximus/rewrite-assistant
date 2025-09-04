@@ -1,9 +1,15 @@
-import React from 'react';
+import React, { forwardRef, useImperativeHandle, useMemo, useRef } from 'react';
 import { useManuscriptStore } from '../stores/manuscriptStore';
+import useIssueHighlighting from '../features/analyze/hooks/useIssueHighlighting';
+import IssueHighlighter from '../features/analyze/components/IssueHighlighter';
 import { IPC_CHANNELS } from '../../shared/constants';
-import type { Scene, ReaderKnowledge } from '../../shared/types';
+import type { Scene, ReaderKnowledge, ContinuityIssue } from '../../shared/types';
 
-// Helper: focused reader context builder (Phase 3.1)
+export interface SceneViewerHandle {
+  scrollToIssue(sceneId: string, issue: ContinuityIssue): void;
+}
+
+// Helper: focused reader context builder
 const buildReaderContext = (previousScenes: Scene[]): ReaderKnowledge => {
   const context: ReaderKnowledge = {
     knownCharacters: new Set<string>(),
@@ -20,7 +26,6 @@ const buildReaderContext = (previousScenes: Scene[]): ReaderKnowledge => {
     scene.locationMarkers?.forEach((loc) => {
       context.establishedSettings.push({ name: loc });
     });
-    // If your Scene type includes plot markers, add them here similarly
     if (Array.isArray((scene as any).plotMarkers)) {
       (scene as any).plotMarkers.forEach((p: string) => {
         context.revealedPlotPoints.push(p);
@@ -31,7 +36,7 @@ const buildReaderContext = (previousScenes: Scene[]): ReaderKnowledge => {
   return context;
 };
 
-const SceneViewer: React.FC = () => {
+const SceneViewer = forwardRef<SceneViewerHandle>((_props, ref) => {
   const { getSelectedScene, manuscript } = useManuscriptStore();
   const selectedScene = getSelectedScene();
   const analysis = selectedScene?.continuityAnalysis;
@@ -59,12 +64,11 @@ const SceneViewer: React.FC = () => {
           issues: (analysis as any).issues,
           previousScenes,
           readerContext,
-          preserveElements: [], // Phase 3.1: placeholder; configurable in 3.2+
+          preserveElements: [],
         }
       );
 
       if (result?.success && result?.rewrittenText) {
-        // Phase 3.1: log to console; state/store integration to follow in Phase 3.2
         // eslint-disable-next-line no-console
         console.log('[SceneViewer] Rewrite generated:', {
           sceneId: selectedScene.id,
@@ -86,6 +90,60 @@ const SceneViewer: React.FC = () => {
       setIsGeneratingRewrite(false);
     }
   };
+
+  const { buildHighlightsForScene, getScrollTarget } = useIssueHighlighting();
+
+  const spans = useMemo(() => {
+    if (!selectedScene) return [];
+    return buildHighlightsForScene(selectedScene.id);
+  }, [selectedScene, buildHighlightsForScene]);
+
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    scrollToIssue(sceneId: string, issue: ContinuityIssue) {
+      const root = containerRef.current;
+      if (!root) return;
+
+      const anchorId = getScrollTarget(sceneId, issue);
+      const escapeAttr = (s: string) => s.replace(/"/g, '\\"');
+
+      let target: HTMLElement | null =
+        (root.querySelector(`[id="${escapeAttr(anchorId)}"]`) as HTMLElement | null) ??
+        (root.querySelector(`[data-issue-id="${escapeAttr(anchorId)}"]`) as HTMLElement | null);
+
+      if (!target) {
+        const startIdx = Array.isArray(issue.textSpan) ? Number(issue.textSpan?.[0] ?? 0) : 0;
+        const candidates = Array.from(root.querySelectorAll<HTMLElement>('[data-start][data-end]'));
+        let best: { el: HTMLElement; dist: number } | null = null;
+        for (const el of candidates) {
+          const a = Number(el.getAttribute('data-start') ?? '0');
+          const b = Number(el.getAttribute('data-end') ?? '0');
+          const contains = a <= startIdx && startIdx < b;
+          const dist = contains ? 0 : Math.min(Math.abs(startIdx - a), Math.abs(startIdx - b));
+          if (!best || dist < best.dist || (dist === best.dist && a <= startIdx)) {
+            best = { el, dist };
+            if (dist === 0) break;
+          }
+        }
+        target = best?.el ?? null;
+      }
+
+      if (target) {
+        try {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch {
+          // no-op if scrollIntoView options unsupported
+          target.scrollIntoView();
+        }
+        // transient flash to draw attention
+        target.classList.add('ring-2', 'ring-indigo-500', 'transition-shadow');
+        setTimeout(() => {
+          target.classList.remove('ring-2', 'ring-indigo-500', 'transition-shadow');
+        }, 1200);
+      }
+    },
+  }));
 
   if (!selectedScene) {
     return (
@@ -118,12 +176,17 @@ const SceneViewer: React.FC = () => {
                   Moved from position {selectedScene.originalPosition + 1}
                 </span>
               )}
-              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                selectedScene.rewriteStatus === 'pending' ? 'bg-gray-100 text-gray-800' :
-                selectedScene.rewriteStatus === 'generated' ? 'bg-blue-100 text-blue-800' :
-                selectedScene.rewriteStatus === 'approved' ? 'bg-green-100 text-green-800' :
-                'bg-red-100 text-red-800'
-              }`}>
+              <span
+                className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                  selectedScene.rewriteStatus === 'pending'
+                    ? 'bg-gray-100 text-gray-800'
+                    : selectedScene.rewriteStatus === 'generated'
+                    ? 'bg-blue-100 text-blue-800'
+                    : selectedScene.rewriteStatus === 'approved'
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-red-100 text-red-800'
+                }`}
+              >
                 {selectedScene.rewriteStatus}
               </span>
             </div>
@@ -132,11 +195,13 @@ const SceneViewer: React.FC = () => {
       </div>
 
       {/* Scene Content */}
-      <div className="flex-1 overflow-auto p-4">
+      <div ref={containerRef} className="flex-1 overflow-auto p-4">
         <div className="prose max-w-none">
-          <div className="whitespace-pre-wrap text-gray-900 leading-relaxed">
-            {selectedScene.currentRewrite || selectedScene.text}
-          </div>
+          <IssueHighlighter
+            content={selectedScene.currentRewrite || selectedScene.text}
+            spans={spans}
+            className="whitespace-pre-wrap text-gray-900 leading-relaxed"
+          />
         </div>
       </div>
 
@@ -160,14 +225,11 @@ const SceneViewer: React.FC = () => {
               <button
                 onClick={handleGenerateRewrite}
                 disabled={isGeneratingRewrite || selectedScene.rewriteStatus === 'pending'}
-                className={`
-                  px-3 py-1 text-sm font-medium rounded-md
-                  focus:outline-none focus:ring-2
-                  ${isGeneratingRewrite || selectedScene.rewriteStatus === 'pending'
+                className={`px-3 py-1 text-sm font-medium rounded-md focus:outline-none focus:ring-2 ${
+                  isGeneratingRewrite || selectedScene.rewriteStatus === 'pending'
                     ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                     : 'text-green-700 bg-green-100 hover:bg-green-200 focus:ring-green-500'
-                  }
-                `}
+                }`}
               >
                 {isGeneratingRewrite || selectedScene.rewriteStatus === 'pending'
                   ? 'Generating...'
@@ -179,7 +241,6 @@ const SceneViewer: React.FC = () => {
       </div>
     </div>
   );
-};
+});
 
 export default SceneViewer;
-

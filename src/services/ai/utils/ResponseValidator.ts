@@ -1,122 +1,336 @@
-import { z } from 'zod';
-import {
-  AnalysisResponse,
-  ProviderName,
-  ValidationError,
-} from '../types';
-
-// ------------ Raw provider schemas ------------
+import { AnalysisResponse, ProviderName, ValidationError } from '../types';
+import type { ContinuityIssue } from '../../../shared/types';
 
 /**
- * OpenAI chat.completions schema where the JSON is in choices[0].message.content
+ * Minimal parser interface compatible with previous .parse(...) usage.
+ * Each schema function returns an object with a parse method that throws on invalid input.
  */
-export function openAIChatSchema() {
-  return z.object({
-    id: z.string().optional(),
-    object: z.string().optional(),
-    choices: z
-      .array(
-        z.object({
-          index: z.number().optional(),
-          message: z.object({
-            role: z.string().optional(),
-            content: z.string(),
-          }),
-          finish_reason: z.string().optional(),
-        })
-      )
-      .min(1),
-    usage: z
-      .object({
-        prompt_tokens: z.number().optional(),
-        completion_tokens: z.number().optional(),
-        total_tokens: z.number().optional(),
-      })
-      .optional(),
-  });
+type Parser<T> = {
+  parse(value: unknown): T;
+};
+
+// ------------ Internal helpers and type guards ------------
+
+const ISSUE_TYPES = ['pronoun', 'timeline', 'character', 'plot', 'context', 'engagement'] as const;
+const ISSUE_SEVERITIES = ['must-fix', 'should-fix', 'consider'] as const;
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object';
+}
+function isString(v: unknown): v is string {
+  return typeof v === 'string';
+}
+function isBoolean(v: unknown): v is boolean {
+  return typeof v === 'boolean';
+}
+function isNumberFinite(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+function isIntegerNonNegative(v: unknown): v is number {
+  return isNumberFinite(v) && Number.isInteger(v) && v >= 0;
+}
+function isProviderName(v: unknown): v is ProviderName {
+  return v === 'anthropic' || v === 'openai' || v === 'google';
+}
+
+function isTextSpan(v: unknown): v is [number, number] {
+  return (
+    Array.isArray(v) &&
+    v.length === 2 &&
+    isIntegerNonNegative(v[0]) &&
+    isIntegerNonNegative(v[1]) &&
+    v[0] <= v[1]
+  );
 }
 
 /**
- * Anthropic Messages API schema where JSON is in content[0].text
+ * Runtime guard for ContinuityIssue.
  */
-export function anthropicSchema() {
-  return z.object({
-    id: z.string().optional(),
-    type: z.string().optional(),
-    role: z.string().optional(),
-    model: z.string().optional(),
-    content: z
-      .array(
-        z.object({
-          type: z.string().optional(),
-          text: z.string(),
-        })
-      )
-      .min(1),
-    usage: z
-      .object({
-        input_tokens: z.number().optional(),
-        output_tokens: z.number().optional(),
-      })
-      .optional(),
-  });
+function isContinuityIssue(v: unknown): v is ContinuityIssue {
+  if (!isObject(v)) return false;
+  const type = (v as Record<string, unknown>).type;
+  const severity = (v as Record<string, unknown>).severity;
+  const description = (v as Record<string, unknown>).description;
+  const textSpan = (v as Record<string, unknown>).textSpan;
+  const suggestedFix = (v as Record<string, unknown>).suggestedFix;
+
+  if (!(isString(type) && (ISSUE_TYPES as readonly string[]).includes(type))) return false;
+  if (!(isString(severity) && (ISSUE_SEVERITIES as readonly string[]).includes(severity))) return false;
+  if (!isString(description)) return false;
+  if (!isTextSpan(textSpan)) return false;
+  if (suggestedFix !== undefined && !isString(suggestedFix)) return false;
+
+  return true;
 }
 
 /**
- * Google Gemini generateContent schema where JSON is in candidates[0].content.parts[].text
+ * Validates and narrows the optional metadata block for normalized responses.
+ * Returns undefined if input is undefined. Throws detailed Error on invalid inputs.
  */
-export function geminiSchema() {
-  return z.object({
-    candidates: z
-      .array(
-        z.object({
-          content: z.object({
-            role: z.string().optional(),
-            parts: z
-              .array(
-                z.object({
-                  text: z.string().optional(),
-                })
-              )
-              .min(1),
-          }),
-          finishReason: z.string().optional(),
-        })
-      )
-      .min(1),
-    promptFeedback: z.unknown().optional(),
-  });
+function validateNormalizedMetadata(
+  meta: unknown
+):
+  | {
+      modelUsed?: string;
+      provider?: ProviderName;
+      costEstimate?: number;
+      durationMs?: number;
+      confidence?: number;
+      cached?: boolean;
+    }
+  | undefined {
+  if (meta === undefined) return undefined;
+  if (!isObject(meta)) throw new Error("Invalid normalized response: 'metadata' must be an object");
+
+  const out: {
+    modelUsed?: string;
+    provider?: ProviderName;
+    costEstimate?: number;
+    durationMs?: number;
+    confidence?: number;
+    cached?: boolean;
+  } = {};
+
+  if ((meta as Record<string, unknown>).modelUsed !== undefined) {
+    if (!isString((meta as Record<string, unknown>).modelUsed))
+      throw new Error("Invalid normalized response: 'metadata.modelUsed' must be a string");
+    out.modelUsed = (meta as Record<string, unknown>).modelUsed as string;
+  }
+  if ((meta as Record<string, unknown>).provider !== undefined) {
+    if (!isProviderName((meta as Record<string, unknown>).provider))
+      throw new Error(
+        "Invalid normalized response: 'metadata.provider' must be 'anthropic' | 'openai' | 'google'"
+      );
+    out.provider = (meta as Record<string, unknown>).provider as ProviderName;
+  }
+  if ((meta as Record<string, unknown>).costEstimate !== undefined) {
+    if (!isNumberFinite((meta as Record<string, unknown>).costEstimate))
+      throw new Error("Invalid normalized response: 'metadata.costEstimate' must be a finite number");
+    out.costEstimate = (meta as Record<string, unknown>).costEstimate as number;
+  }
+  if ((meta as Record<string, unknown>).durationMs !== undefined) {
+    if (!isNumberFinite((meta as Record<string, unknown>).durationMs))
+      throw new Error("Invalid normalized response: 'metadata.durationMs' must be a finite number");
+    out.durationMs = (meta as Record<string, unknown>).durationMs as number;
+  }
+  if ((meta as Record<string, unknown>).confidence !== undefined) {
+    const c = (meta as Record<string, unknown>).confidence;
+    if (!isNumberFinite(c) || (c as number) < 0 || (c as number) > 1) {
+      throw new Error("Invalid normalized response: 'metadata.confidence' must be a number in [0,1]");
+    }
+    out.confidence = c as number;
+  }
+  if ((meta as Record<string, unknown>).cached !== undefined) {
+    if (!isBoolean((meta as Record<string, unknown>).cached))
+      throw new Error("Invalid normalized response: 'metadata.cached' must be a boolean");
+    out.cached = (meta as Record<string, unknown>).cached as boolean;
+  }
+  return out;
 }
 
-// ------------ Normalized response schema (internal) ------------
+// ------------ Raw provider response shapes and guards ------------
 
-const continuityIssueSchema = z.object({
-  type: z.enum(['pronoun', 'timeline', 'character', 'plot', 'context', 'engagement']),
-  severity: z.enum(['must-fix', 'should-fix', 'consider']),
-  description: z.string(),
-  textSpan: z
-    .tuple([z.number().int().nonnegative(), z.number().int().nonnegative()])
-    .refine(([a, b]: [number, number]) => a <= b, { message: 'textSpan start must be <= end' }),
-  suggestedFix: z.string().optional(),
-});
+interface OpenAIChatMessage {
+  role?: string;
+  content: string;
+}
+interface OpenAIChoice {
+  index?: number;
+  message: OpenAIChatMessage;
+  finish_reason?: string;
+}
+interface OpenAIChatResponse {
+  id?: string;
+  object?: string;
+  choices: OpenAIChoice[];
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+}
+
+function isOpenAIChatResponse(v: unknown): v is OpenAIChatResponse {
+  if (!isObject(v)) return false;
+  const choices = (v as Record<string, unknown>).choices;
+  if (!Array.isArray(choices) || choices.length < 1) return false;
+
+  const first = choices[0];
+  if (!isObject(first)) return false;
+  const message = (first as Record<string, unknown>).message;
+  if (!isObject(message)) return false;
+  const content = (message as Record<string, unknown>).content;
+  if (!isString(content)) return false;
+
+  return true;
+}
+
+interface AnthropicContentItem {
+  type?: string;
+  text: string;
+}
+interface AnthropicResponse {
+  id?: string;
+  type?: string;
+  role?: string;
+  model?: string;
+  content: AnthropicContentItem[];
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+  };
+}
+
+function isAnthropicResponse(v: unknown): v is AnthropicResponse {
+  if (!isObject(v)) return false;
+  const content = (v as Record<string, unknown>).content;
+  if (!Array.isArray(content) || content.length < 1) return false;
+  const first = content[0];
+  if (!isObject(first)) return false;
+  const text = (first as Record<string, unknown>).text;
+  if (!isString(text)) return false;
+  return true;
+}
+
+interface GeminiPart {
+  text?: string;
+}
+interface GeminiContent {
+  role?: string;
+  parts: GeminiPart[];
+}
+interface GeminiCandidate {
+  content: GeminiContent;
+  finishReason?: string;
+}
+interface GeminiResponse {
+  candidates: GeminiCandidate[];
+  promptFeedback?: unknown;
+}
+
+function isGeminiResponse(v: unknown): v is GeminiResponse {
+  if (!isObject(v)) return false;
+  const candidates = (v as Record<string, unknown>).candidates;
+  if (!Array.isArray(candidates) || candidates.length < 1) return false;
+  const first = candidates[0];
+  if (!isObject(first)) return false;
+  const content = (first as Record<string, unknown>).content;
+  if (!isObject(content)) return false;
+  const parts = (content as Record<string, unknown>).parts;
+  if (!Array.isArray(parts) || parts.length < 1) return false;
+  // Not all parts must have text, but structure must exist
+  return true;
+}
+
+// ------------ Raw provider "schema" factories (public API compatible) ------------
+
+/**
+ * OpenAI chat.completions "schema" returning a parser with .parse(raw).
+ * Ensures choices[0].message.content is a string.
+ */
+export function openAIChatSchema(): Parser<OpenAIChatResponse> {
+  return {
+    parse(raw: unknown): OpenAIChatResponse {
+      if (!isOpenAIChatResponse(raw)) {
+        throw new Error('Invalid OpenAI chat response: expected choices[0].message.content as string');
+      }
+      return raw;
+    },
+  };
+}
+
+/**
+ * Anthropic Messages API "schema" returning a parser with .parse(raw).
+ * Ensures content[0].text is a string.
+ */
+export function anthropicSchema(): Parser<AnthropicResponse> {
+  return {
+    parse(raw: unknown): AnthropicResponse {
+      if (!isAnthropicResponse(raw)) {
+        throw new Error('Invalid Anthropic response: expected content[0].text as string');
+      }
+      return raw;
+    },
+  };
+}
+
+/**
+ * Google Gemini generateContent "schema" returning a parser with .parse(raw).
+ * Ensures candidates[0].content.parts exists; later we find a part with non-empty text.
+ */
+export function geminiSchema(): Parser<GeminiResponse> {
+  return {
+    parse(raw: unknown): GeminiResponse {
+      if (!isGeminiResponse(raw)) {
+        throw new Error('Invalid Gemini response: expected candidates[0].content.parts array');
+      }
+      return raw;
+    },
+  };
+}
+
+// ------------ Normalized response "schema" (public) ------------
 
 /**
  * Schema for normalized output. Allows partial metadata during parsing; defaults are applied later.
+ * - issues: missing issues is treated as [] (empty array)
+ * - metadata: optional; fields validated if present
  */
-export function normalizedResponseSchema() {
-  return z.object({
-    issues: z.array(continuityIssueSchema).default([]),
-    metadata: z
-      .object({
-        modelUsed: z.string().optional(),
-        provider: z.enum(['anthropic', 'openai', 'google']).optional(),
-        costEstimate: z.number().optional(),
-        durationMs: z.number().optional(),
-        confidence: z.number().min(0).max(1).optional(),
-        cached: z.boolean().optional(),
-      })
-      .optional(),
-  });
+export function normalizedResponseSchema(): Parser<{
+  issues: ContinuityIssue[];
+  metadata?:
+    | {
+        modelUsed?: string;
+        provider?: ProviderName;
+        costEstimate?: number;
+        durationMs?: number;
+        confidence?: number;
+        cached?: boolean;
+      }
+    | undefined;
+}> {
+  return {
+    parse(
+      raw: unknown
+    ): {
+      issues: ContinuityIssue[];
+      metadata?:
+        | {
+            modelUsed?: string;
+            provider?: ProviderName;
+            costEstimate?: number;
+            durationMs?: number;
+            confidence?: number;
+            cached?: boolean;
+          }
+        | undefined;
+    } {
+      if (!isObject(raw)) {
+        throw new Error('Invalid normalized response: expected an object');
+      }
+
+      const issuesRaw = (raw as Record<string, unknown>).issues;
+      let issues: ContinuityIssue[] = [];
+      if (issuesRaw === undefined) {
+        issues = [];
+      } else {
+        if (!Array.isArray(issuesRaw)) {
+          throw new Error("Invalid normalized response: 'issues' must be an array");
+        }
+        issuesRaw.forEach((item, idx) => {
+          if (!isContinuityIssue(item)) {
+            // Provide a precise messaging on failure
+            throw new Error(`Invalid ContinuityIssue at index ${idx}`);
+          }
+        });
+        issues = issuesRaw as ContinuityIssue[];
+      }
+
+      const metadata = validateNormalizedMetadata((raw as Record<string, unknown>).metadata);
+
+      return { issues, metadata };
+    },
+  };
 }
 
 // ------------ Utilities ------------
@@ -181,7 +395,9 @@ function extractTextPayload(provider: ProviderName, raw: unknown): string {
     // google
     const parsed = geminiSchema().parse(raw);
     const parts = parsed.candidates[0]?.content?.parts ?? [];
-    const firstWithText = parts.find((p: { text?: string }) => typeof p.text === 'string' && (p.text?.length ?? 0) > 0);
+    const firstWithText = parts.find(
+      (p: { text?: string }) => typeof p.text === 'string' && ((p.text?.length ?? 0) > 0)
+    );
     if (!firstWithText || !firstWithText.text) {
       throw new Error('No text part found in Gemini response');
     }
