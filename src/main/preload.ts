@@ -22,6 +22,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }
 });
 
+// Expose a minimal ipcRenderer bridge to support invoke-based workflows (used by rewrite store/UI)
+contextBridge.exposeInMainWorld('electron', {
+  ipcRenderer: {
+    invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
+  }
+});
+
 // Type definitions for the exposed API
 declare global {
   interface Window {
@@ -35,6 +42,12 @@ declare global {
         node: string;
         chrome: string;
         electron: string;
+      };
+    };
+    // Minimal ipc bridge typing (only what's exposed)
+    electron: {
+      ipcRenderer: {
+        invoke: (channel: string, ...args: any[]) => Promise<any>;
       };
     };
   }

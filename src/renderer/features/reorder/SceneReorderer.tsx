@@ -3,6 +3,7 @@ import { useManuscriptStore } from '../../stores/manuscriptStore';
 import { draggable, dropTargetForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine';
 import { reorder } from '@atlaskit/pragmatic-drag-and-drop/reorder';
+import useRewriteStore from '../rewrite/stores/rewriteStore';
 
 interface DraggableSceneItemProps {
   scene: any;
@@ -20,6 +21,8 @@ const DraggableSceneItem: React.FC<DraggableSceneItemProps> = ({
   const ref = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = React.useState(false);
   const [isDropTarget, setIsDropTarget] = React.useState(false);
+  const { hasRewrite } = useRewriteStore();
+  const hasRewriteReady = hasRewrite(scene.id);
 
   useEffect(() => {
     const element = ref.current;
@@ -89,6 +92,22 @@ const DraggableSceneItem: React.FC<DraggableSceneItemProps> = ({
       <div className="mt-2 text-xs text-gray-600 line-clamp-2">
         {scene.text.substring(0, 100)}...
       </div>
+
+      {/* Rewrite status indicators */}
+      {scene.hasBeenMoved && (
+        <div className="flex items-center gap-2 mt-1">
+          <span className="text-xs text-amber-600">Moved</span>
+          {hasRewriteReady && (
+            <span className="text-xs text-green-600">Rewrite Available</span>
+          )}
+          {scene.rewriteStatus === 'approved' && (
+            <span className="text-xs text-blue-600">Applied</span>
+          )}
+          {scene.rewriteStatus === 'rejected' && (
+            <span className="text-xs text-red-600">Rejected</span>
+          )}
+        </div>
+      )}
     </div>
   );
 };
