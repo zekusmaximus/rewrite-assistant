@@ -1,9 +1,91 @@
 import React from 'react';
 import { useManuscriptStore } from '../stores/manuscriptStore';
+import { IPC_CHANNELS } from '../../shared/constants';
+import type { Scene, ReaderKnowledge } from '../../shared/types';
+
+// Helper: focused reader context builder (Phase 3.1)
+const buildReaderContext = (previousScenes: Scene[]): ReaderKnowledge => {
+  const context: ReaderKnowledge = {
+    knownCharacters: new Set<string>(),
+    establishedTimeline: [],
+    revealedPlotPoints: [],
+    establishedSettings: [],
+  };
+
+  previousScenes.forEach((scene) => {
+    scene.characters?.forEach((char) => context.knownCharacters.add(char));
+    scene.timeMarkers?.forEach((marker) => {
+      context.establishedTimeline.push({ label: marker });
+    });
+    scene.locationMarkers?.forEach((loc) => {
+      context.establishedSettings.push({ name: loc });
+    });
+    // If your Scene type includes plot markers, add them here similarly
+    if (Array.isArray((scene as any).plotMarkers)) {
+      (scene as any).plotMarkers.forEach((p: string) => {
+        context.revealedPlotPoints.push(p);
+      });
+    }
+  });
+
+  return context;
+};
 
 const SceneViewer: React.FC = () => {
-  const { getSelectedScene } = useManuscriptStore();
+  const { getSelectedScene, manuscript } = useManuscriptStore();
   const selectedScene = getSelectedScene();
+  const analysis = selectedScene?.continuityAnalysis;
+  const [isGeneratingRewrite, setIsGeneratingRewrite] = React.useState(false);
+
+  const handleGenerateRewrite = async () => {
+    if (!selectedScene || !(analysis as any)?.issues) return;
+
+    setIsGeneratingRewrite(true);
+    try {
+      const currentOrder = manuscript?.currentOrder || [];
+      const sceneIndex = currentOrder.indexOf(selectedScene.id);
+      const previousSceneIds = currentOrder.slice(Math.max(0, sceneIndex - 3), sceneIndex);
+      const previousScenes = previousSceneIds
+        .map((id) => manuscript?.scenes.find((s) => s.id === id))
+        .filter(Boolean) as Scene[];
+
+      const readerContext = buildReaderContext(previousScenes);
+
+      const result = await (window as any).electron?.ipcRenderer?.invoke(
+        IPC_CHANNELS.GENERATE_REWRITE,
+        {
+          sceneId: selectedScene.id,
+          scene: selectedScene,
+          issues: (analysis as any).issues,
+          previousScenes,
+          readerContext,
+          preserveElements: [], // Phase 3.1: placeholder; configurable in 3.2+
+        }
+      );
+
+      if (result?.success && result?.rewrittenText) {
+        // Phase 3.1: log to console; state/store integration to follow in Phase 3.2
+        // eslint-disable-next-line no-console
+        console.log('[SceneViewer] Rewrite generated:', {
+          sceneId: selectedScene.id,
+          explanation: result.changesExplanation,
+          model: result.modelUsed,
+        });
+        // eslint-disable-next-line no-console
+        console.log('Original:', selectedScene.text);
+        // eslint-disable-next-line no-console
+        console.log('Rewritten:', result.rewrittenText);
+      } else {
+        // eslint-disable-next-line no-console
+        console.error('[SceneViewer] Rewrite generation failed:', result?.error || 'Unknown error');
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[SceneViewer] Error generating rewrite:', err);
+    } finally {
+      setIsGeneratingRewrite(false);
+    }
+  };
 
   if (!selectedScene) {
     return (
@@ -74,9 +156,24 @@ const SceneViewer: React.FC = () => {
                 Analyze Issues
               </button>
             )}
-            <button className="px-3 py-1 text-sm font-medium text-green-700 bg-green-100 rounded-md hover:bg-green-200 focus:outline-none focus:ring-2 focus:ring-green-500">
-              Generate Rewrite
-            </button>
+            {selectedScene?.hasBeenMoved && (analysis as any)?.issues?.length > 0 && (
+              <button
+                onClick={handleGenerateRewrite}
+                disabled={isGeneratingRewrite || selectedScene.rewriteStatus === 'pending'}
+                className={`
+                  px-3 py-1 text-sm font-medium rounded-md
+                  focus:outline-none focus:ring-2
+                  ${isGeneratingRewrite || selectedScene.rewriteStatus === 'pending'
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'text-green-700 bg-green-100 hover:bg-green-200 focus:ring-green-500'
+                  }
+                `}
+              >
+                {isGeneratingRewrite || selectedScene.rewriteStatus === 'pending'
+                  ? 'Generating...'
+                  : 'Generate Rewrite'}
+              </button>
+            )}
           </div>
         </div>
       </div>

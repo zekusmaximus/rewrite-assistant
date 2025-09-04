@@ -22,7 +22,7 @@ export const SUPPORTED_FILE_TYPES = [
   { name: 'All Files', extensions: ['*'] }
 ];
 
-// IPC channel names
+ // IPC channel names
 export const IPC_CHANNELS = {
   LOAD_FILE: 'load-file',
   LOAD_SPECIFIC_FILE: 'load-specific-file',
@@ -38,7 +38,10 @@ export const IPC_CHANNELS = {
   // Cache management channels
   GET_CACHE_STATS: 'cache:get_stats',
   CLEAR_ANALYSIS_CACHE: 'cache:clear_analysis_cache',
-  WARM_CACHE: 'cache:warm'
+  WARM_CACHE: 'cache:warm',
+  // Rewrite generation channels
+  GENERATE_REWRITE: 'rewrite:generate',
+  REWRITE_PROGRESS: 'rewrite:progress'
 };
 
 // Default manuscript file name

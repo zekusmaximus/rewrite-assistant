@@ -161,3 +161,9 @@ export class TimeoutError extends Error {
     this.timeoutMs = timeoutMs;
   }
 }
+// Extend AnalysisRequest to support custom prompts for rewriting
+export interface AnalysisRequestExtension {
+  customPrompt?: string;
+  isRewriteRequest?: boolean;
+  preserveElements?: string[];
+}

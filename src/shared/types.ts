@@ -128,3 +128,36 @@ export interface SaveFileMessage extends IPCMessage {
  };
 }
 
+
+// ADD these new interfaces - do not modify existing ones
+
+export interface RewriteVersion {
+  id: string;
+  sceneId: string;
+  timestamp: number;
+  rewrittenText: string;
+  issuesAddressed: ContinuityIssue[];
+  changesExplanation: string;
+  modelUsed: string;
+  userEdited: boolean;
+  appliedToManuscript: boolean;
+}
+
+export interface DiffSegment {
+  type: 'added' | 'removed' | 'unchanged';
+  text: string;
+  startIndex: number;
+  endIndex: number;
+  reason?: string;
+  relatedIssueId?: string;
+}
+
+// Extend the existing Scene interface with optional rewrite fields
+// Use TypeScript interface merging to avoid editing the original declaration
+export interface SceneRewriteExtension {
+  rewriteHistory?: RewriteVersion[];
+  lastRewriteTimestamp?: number;
+}
+
+// Merge these fields into the existing Scene via declaration merging
+export interface Scene extends SceneRewriteExtension {}

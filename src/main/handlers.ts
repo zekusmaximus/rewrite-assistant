@@ -1,10 +1,11 @@
-import { ipcMain, dialog } from 'electron';
+import { ipcMain, dialog, BrowserWindow } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { mainWindow } from './index';
 import { IPC_CHANNELS, SUPPORTED_FILE_TYPES, DEFAULT_MANUSCRIPT_FILE } from '../shared/constants';
 import { Manuscript, Scene, ReaderKnowledge } from '../shared/types';
 import AIServiceManager from '../services/ai/AIServiceManager';
+import SceneRewriter from '../services/rewrite/SceneRewriter';
 import type { AnalysisRequest, AnalysisType, ClaudeConfig, OpenAIConfig, GeminiConfig } from '../services/ai/types';
 import AnalysisCache from '../services/cache/AnalysisCache';
  
@@ -13,6 +14,8 @@ import AnalysisCache from '../services/cache/AnalysisCache';
  * Create a single app-wide AIServiceManager instance for provider usage, caching, and metrics.
  */
 const aiManager = new AIServiceManager();
+// Scene rewriter singleton (reuses shared AI manager)
+const sceneRewriter = new SceneRewriter(aiManager);
 
 // Cache singleton for analysis results (lazy init)
 const analysisCache = new AnalysisCache();
@@ -367,6 +370,56 @@ export function setupIPCHandlers(): void {
       console.warn('[IPC][ANALYZE_CONTINUITY] analyze failed:', err);
       const base = toErrorResponse(err, 'ANALYZE_FAILED');
       return { ...base, metadata: { providerState: aiManager.getMetrics().lastErrors } };
+    }
+  });
+
+  // AI: Generate single-scene rewrite
+  ipcMain.handle(IPC_CHANNELS.GENERATE_REWRITE, async (event: any, payload: any) => {
+    try {
+      console.log('[Handlers] Generate rewrite request for scene:', payload?.sceneId);
+
+      // Validate payload
+      if (!payload?.scene || !payload?.issues || !Array.isArray(payload.issues) || payload.issues.length === 0) {
+        return toErrorResponse('Invalid request: missing scene or issues', 'REWRITE_GENERATION_ERROR');
+      }
+
+      // Build reader context from provided or defaults
+      const readerContext = normalizeReaderKnowledge(payload.readerContext || {
+        knownCharacters: new Set(),
+        establishedTimeline: [],
+        revealedPlotPoints: [],
+        establishedSettings: [],
+      });
+
+      // Previous scenes for context (limit to last 3)
+      const previousScenes = Array.isArray(payload.previousScenes) ? (payload.previousScenes as Scene[]).slice(-3) : [];
+
+      // Create rewrite request
+      const request = {
+        scene: payload.scene as Scene,
+        issuesFound: payload.issues,
+        readerContext,
+        previousScenes,
+        preserveElements: Array.isArray(payload.preserveElements) ? payload.preserveElements : [],
+      };
+
+      // Generate rewrite
+      const result = await sceneRewriter.rewriteScene(request);
+
+      // Send progress update (if a main window pattern exists)
+      const win = typeof mainWindow !== 'undefined' && mainWindow ? mainWindow : (BrowserWindow.getAllWindows?.()[0] || undefined);
+      if (win && !win.isDestroyed?.()) {
+        win.webContents.send(IPC_CHANNELS.REWRITE_PROGRESS, {
+          sceneId: payload.sceneId || payload.scene?.id,
+          status: result.success ? 'complete' : 'failed',
+        });
+      }
+
+      return result;
+    } catch (error) {
+      console.error('[Handlers] Rewrite generation error:', error);
+      // Keep existing error-to-response mapping utility
+      return toErrorResponse(error, 'REWRITE_GENERATION_ERROR');
     }
   });
 
