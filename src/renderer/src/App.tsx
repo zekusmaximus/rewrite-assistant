@@ -7,7 +7,8 @@ import ErrorMessage from '../components/ErrorMessage';
 import IssuePanel from '../features/analyze/components/IssuePanel';
 import useAnalysis from '../features/analyze/hooks/useAnalysis';
 import type { ContinuityIssue } from '../../shared/types';
-
+import RewritePanel from '../features/rewrite/components/RewritePanel';
+ 
 const App: React.FC = () => {
   const { 
     manuscript, 
@@ -25,6 +26,7 @@ const App: React.FC = () => {
 
   // Local Issues panel state and analysis hook
   const [issuesOpen, setIssuesOpen] = useState(false);
+  const [rewritePanelOpen, setRewritePanelOpen] = useState(false);
   const sceneViewerRef = useRef<SceneViewerHandle | null>(null);
   const { analyzeMovedScenes } = useAnalysis();
 
@@ -213,6 +215,12 @@ const App: React.FC = () => {
                 >
                   🔍 Find Issues
                 </button>
+                <button
+                  onClick={() => setRewritePanelOpen(!rewritePanelOpen)}
+                  className="px-4 py-2 text-sm font-medium text-purple-700 bg-purple-100 rounded-md hover:bg-purple-200"
+                >
+                  Rewrite Panel
+                </button>
               </>
             )}
           </div>
@@ -249,9 +257,14 @@ const App: React.FC = () => {
             </div>
 
             {/* Scene Content (Right Panel) */}
-            <div className="w-1/2 bg-white">
+            <div className="flex-1 bg-white">
               <SceneViewer ref={sceneViewerRef} />
             </div>
+            {manuscript && rewritePanelOpen && (
+              <div className="w-96 bg-gray-50 border-l border-gray-200 overflow-hidden flex flex-col">
+                <RewritePanel />
+              </div>
+            )}
           </>
         ) : (
           /* Welcome Screen */

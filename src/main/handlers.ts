@@ -14,8 +14,7 @@ import AnalysisCache from '../services/cache/AnalysisCache';
  * Create a single app-wide AIServiceManager instance for provider usage, caching, and metrics.
  */
 const aiManager = new AIServiceManager();
-// Scene rewriter singleton (reuses shared AI manager)
-const sceneRewriter = new SceneRewriter(aiManager);
+// Scene rewriter will be instantiated per request to ensure proper mocking in tests
 
 // Cache singleton for analysis results (lazy init)
 const analysisCache = new AnalysisCache();
@@ -296,6 +295,7 @@ export function setupIPCHandlers(): void {
       console.error('Error saving file:', error);
       throw error;
     }
+  });
   // AI: Configure providers (Anthropic/OpenAI/Gemini)
   ipcMain.handle(IPC_CHANNELS.CONFIGURE_AI_PROVIDER, async (event: any, payload: any) => {
     try {
@@ -403,15 +403,17 @@ export function setupIPCHandlers(): void {
         preserveElements: Array.isArray(payload.preserveElements) ? payload.preserveElements : [],
       };
 
-      // Generate rewrite
-      const result = await sceneRewriter.rewriteScene(request);
+      // Generate rewrite (instantiate per-call to cooperate with test mocks)
+      const localRewriter = new SceneRewriter(aiManager);
+      const result = await localRewriter.rewriteScene(request);
 
       // Send progress update (if a main window pattern exists)
       const win = typeof mainWindow !== 'undefined' && mainWindow ? mainWindow : (BrowserWindow.getAllWindows?.()[0] || undefined);
       if (win && !win.isDestroyed?.()) {
+        const status = result && (result as any).success ? 'complete' : 'failed';
         win.webContents.send(IPC_CHANNELS.REWRITE_PROGRESS, {
           sceneId: payload.sceneId || payload.scene?.id,
-          status: result.success ? 'complete' : 'failed',
+          status,
         });
       }
 
@@ -449,6 +451,5 @@ export function setupIPCHandlers(): void {
     try { await analysisCache.warmCache(Array.isArray(scenes) ? scenes : []); return true; } catch { return false; }
   });
 
-  });
 }
  

@@ -3,6 +3,8 @@ import type { RewriteVersion, DiffSegment, Scene } from '../../../../shared/type
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import { IPC_CHANNELS } from '../../../../shared/constants';
 import DiffEngine from '../../../../services/rewrite/DiffEngine';
+import RewriteOrchestrator from '../../../../services/rewrite/RewriteOrchestrator';
+import type { BatchRewriteProgress, BatchRewriteOptions } from '../../../../services/rewrite/RewriteOrchestrator';
 
 interface RewriteState {
   // Current rewrite operation state
@@ -21,6 +23,15 @@ interface RewriteState {
   
   // Diff data cache for performance
   diffCache: Map<string, DiffSegment[]>;
+
+  // Batch operations
+  batchProgress?: BatchRewriteProgress;
+  isBatchRewriting: boolean;
+  batchOrchestrator?: RewriteOrchestrator;
+  batchCancelled: boolean;
+
+  // History management
+  showHistory: Map<string, boolean>;
   
   // Actions
   generateRewrite: (sceneId: string) => Promise<void>;
@@ -30,6 +41,13 @@ interface RewriteState {
   applyRewrite: (sceneId: string) => void;
   rejectRewrite: (sceneId: string) => void;
   clearRewrite: (sceneId: string) => void;
+
+  // Batch actions
+  startBatchRewrite: (options?: BatchRewriteOptions) => Promise<void>;
+  cancelBatchRewrite: () => void;
+  toggleHistory: (sceneId: string) => void;
+  clearAllRewrites: () => void;
+  getRewriteHistory: (sceneId: string) => RewriteVersion[];
   
   // Getters
   getLatestRewrite: (sceneId: string) => RewriteVersion | undefined;
@@ -49,6 +67,15 @@ const useRewriteStore = create<RewriteState>((set, get) => ({
   sceneRewrites: new Map(),
   activeEdits: new Map(),
   diffCache: new Map(),
+
+  // Batch defaults
+  batchProgress: undefined,
+  isBatchRewriting: false,
+  batchOrchestrator: undefined,
+  batchCancelled: false,
+
+  // History UI tracking
+  showHistory: new Map(),
   
   generateRewrite: async (sceneId: string) => {
     const manuscript = useManuscriptStore.getState().manuscript;
@@ -147,9 +174,7 @@ const useRewriteStore = create<RewriteState>((set, get) => ({
           activeEdits.delete(sceneId);
           
           // Generate and cache diff
-          const diffSegments = DiffEngine.generateDiff(
-            scene.text,
-            result.rewrittenText,
+          const diffSegments = DiffEngine.generateDiff(scene.text, result.rewrittenText!,
             { granularity: 'word', includeReasons: true }
           );
           
@@ -328,6 +353,161 @@ const useRewriteStore = create<RewriteState>((set, get) => ({
       rewriteStatus: 'pending',
       currentRewrite: undefined
     });
+  },
+  
+  // Batch operations
+  startBatchRewrite: async (options: BatchRewriteOptions = {}) => {
+    const manuscript = useManuscriptStore.getState().manuscript;
+    if (!manuscript) {
+      console.warn('[RewriteStore] No manuscript for batch rewrite');
+      return;
+    }
+    
+    // Create orchestrator if needed
+    let orchestrator = get().batchOrchestrator;
+    if (!orchestrator) {
+      orchestrator = new RewriteOrchestrator();
+      set({ batchOrchestrator: orchestrator });
+    }
+    
+    set({
+      isBatchRewriting: true,
+      batchCancelled: false,
+      batchProgress: {
+        totalScenes: 0,
+        completedScenes: 0,
+        phase: 'preparing',
+        message: 'Starting batch rewrite...',
+        results: new Map(),
+        errors: new Map()
+      }
+    });
+    
+    try {
+      // Set up progress callback
+      const progressCallback = (progress: BatchRewriteProgress) => {
+        set({ batchProgress: progress });
+        
+        // Update individual scene rewrites as they complete
+        progress.results.forEach((result, sceneId) => {
+          if (result.success && result.rewrittenText) {
+            const rewriteVersion: RewriteVersion = {
+              id: `${sceneId}-batch-${Date.now()}`,
+              sceneId,
+              timestamp: Date.now(),
+              rewrittenText: result.rewrittenText,
+              issuesAddressed: result.issuesAddressed || [],
+              changesExplanation: result.changesExplanation || '',
+              modelUsed: result.modelUsed || 'unknown',
+              userEdited: false,
+              appliedToManuscript: false
+            };
+            
+            set(state => {
+              const rewrites = new Map(state.sceneRewrites);
+              // Batch also replaces existing rewrites (ONE rewrite rule)
+              rewrites.set(sceneId, [rewriteVersion]);
+              
+              // Update diff cache
+              const manuscriptLocal = useManuscriptStore.getState().manuscript;
+              const scene = manuscriptLocal?.scenes.find(s => s.id === sceneId);
+              if (scene) {
+                const diffSegments = DiffEngine.generateDiff(scene.text, result.rewrittenText!,
+                  { granularity: 'word', includeReasons: true }
+                );
+                const diffCache = new Map(state.diffCache);
+                diffCache.set(sceneId, diffSegments);
+                return { sceneRewrites: rewrites, diffCache };
+              }
+              
+              return { sceneRewrites: rewrites };
+            });
+            
+            // Update manuscript scene status
+            useManuscriptStore.getState().updateScene(sceneId, {
+              rewriteStatus: 'generated',
+              currentRewrite: result.rewrittenText
+            });
+          }
+        });
+      };
+      
+      // Run batch rewrite
+      const finalProgress = await orchestrator.rewriteMovedScenes(
+        manuscript,
+        {
+          ...options,
+          progressCallback,
+          skipIfNoIssues: options.skipIfNoIssues ?? true
+        }
+      );
+      
+      // Only set final progress if not cancelled in the meantime
+      if (!get().batchCancelled) {
+        set({ batchProgress: finalProgress });
+      }
+      
+    } catch (error) {
+      console.error('[RewriteStore] Batch rewrite error:', error);
+      set(state => ({
+        batchProgress: state.batchProgress ? {
+          ...state.batchProgress,
+          phase: 'error',
+          message: 'Batch rewrite failed'
+        } : undefined
+      }));
+    } finally {
+      set({ isBatchRewriting: false });
+    }
+  },
+  
+  cancelBatchRewrite: () => {
+    const orchestrator = get().batchOrchestrator;
+    orchestrator?.cancelBatch();
+    
+    set(state => ({
+      isBatchRewriting: false,
+      batchCancelled: true,
+      batchProgress: state.batchProgress ? {
+        ...state.batchProgress,
+        phase: 'error',
+        message: 'Batch rewrite cancelled'
+      } : undefined
+    }));
+  },
+  
+  toggleHistory: (sceneId: string) => {
+    set(state => {
+      const showHistory = new Map(state.showHistory);
+      showHistory.set(sceneId, !showHistory.get(sceneId));
+      return { showHistory };
+    });
+  },
+  
+  clearAllRewrites: () => {
+    set({
+      sceneRewrites: new Map(),
+      activeEdits: new Map(),
+      diffCache: new Map(),
+      showHistory: new Map(),
+      batchProgress: undefined
+    });
+    
+    // Reset all scene statuses
+    const manuscript = useManuscriptStore.getState().manuscript;
+    manuscript?.scenes.forEach(scene => {
+      if (scene.currentRewrite || scene.rewriteStatus !== 'pending') {
+        useManuscriptStore.getState().updateScene(scene.id, {
+          rewriteStatus: 'pending',
+          currentRewrite: undefined
+        });
+      }
+    });
+  },
+  
+  getRewriteHistory: (sceneId: string) => {
+    // Store currently only keeps latest, but structure supports history
+    return get().sceneRewrites.get(sceneId) || [];
   },
   
   // Getters
