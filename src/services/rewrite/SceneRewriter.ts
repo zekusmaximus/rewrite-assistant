@@ -46,6 +46,10 @@ export interface DiffSegment {
 class SceneRewriter {
   private aiManager: AIServiceManager;
 
+  // Retry handling
+  private retryCount = new Map<string, number>();
+  private maxRetries = 3;
+
   constructor(aiManager?: AIServiceManager) {
     // Use provided manager or create new instance
     this.aiManager = aiManager || new AIServiceManager();
@@ -253,6 +257,78 @@ Hard constraints:
     // Join with semicolons to form a single human-readable sentence
     return fixes.join('; ');
   }
-}
+async rewriteSceneWithRetry(request: RewriteRequest): Promise<RewriteResult> {
+    const sceneId = request.scene.id;
+    let lastError: Error | null = null;
+  
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      try {
+        // Clear any previous errors
+        lastError = null;
+        
+        // Exponential backoff
+        if (attempt > 0) {
+          const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
+          await this.delay(delay);
+        }
+        
+        // Attempt rewrite
+        const result = await this.rewriteScene(request);
+        
+        if (result.success) {
+          this.retryCount.delete(sceneId);
+          return result;
+        }
+        
+        // If not successful but no error, don't retry
+        if (!result.error || result.error.includes('No issues')) {
+          return result;
+        }
+        
+        lastError = new Error(result.error);
 
+        if (!this.isRetryableError(lastError)) {
+          break;
+        }
+      } catch (error) {
+        console.warn(`[SceneRewriter] Attempt ${attempt + 1} failed:`, error);
+        lastError = error instanceof Error ? error : new Error('Unknown error');
+        
+        // Check if error is retryable
+        if (!this.isRetryableError(lastError)) {
+          break;
+        }
+      }
+    }
+    
+    // All retries exhausted
+    return {
+      success: false,
+      issuesAddressed: [],
+      changesExplanation: '',
+      preservedElements: [],
+      diffData: [],
+      error: `Failed after ${this.maxRetries} attempts: ${lastError?.message || 'Unknown error'}`
+    };
+  }
+
+  private isRetryableError(error: Error): boolean {
+    const message = error.message.toLowerCase();
+    
+    // Don't retry on these errors
+    const nonRetryable = [
+      'invalid api key',
+      'no issues',
+      'invalid request',
+      'scene not found'
+    ];
+    
+    return !nonRetryable.some(phrase => message.includes(phrase));
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
+  
 export default SceneRewriter;

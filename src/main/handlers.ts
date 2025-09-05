@@ -1,19 +1,21 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron';
+import { ipcMain, dialog, BrowserWindow, shell } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { mainWindow } from './index';
 import { IPC_CHANNELS, SUPPORTED_FILE_TYPES, DEFAULT_MANUSCRIPT_FILE } from '../shared/constants';
-import { Manuscript, Scene, ReaderKnowledge } from '../shared/types';
+import { Manuscript, Scene, ReaderKnowledge, RewriteVersion } from '../shared/types';
 import AIServiceManager from '../services/ai/AIServiceManager';
 import SceneRewriter from '../services/rewrite/SceneRewriter';
 import type { AnalysisRequest, AnalysisType, ClaudeConfig, OpenAIConfig, GeminiConfig } from '../services/ai/types';
 import AnalysisCache from '../services/cache/AnalysisCache';
+import ManuscriptExporter, { ExportOptions } from '../services/export/ManuscriptExporter';
  
 // AI service manager singleton and helpers
 /**
  * Create a single app-wide AIServiceManager instance for provider usage, caching, and metrics.
  */
 const aiManager = new AIServiceManager();
+const manuscriptExporter = new ManuscriptExporter();
 // Scene rewriter will be instantiated per request to ensure proper mocking in tests
 
 // Cache singleton for analysis results (lazy init)
@@ -296,6 +298,72 @@ export function setupIPCHandlers(): void {
       throw error;
     }
   });
+  // Export manuscript with rewrites
+  ipcMain.handle(IPC_CHANNELS.EXPORT_WITH_REWRITES, async (event: any, payload: any) => {
+    try {
+      const { manuscript, rewrites, options } = payload || {};
+      
+      if (!manuscript) {
+        return toErrorResponse('No manuscript to export', 'EXPORT_ERROR');
+      }
+      
+      // Convert rewrites from serialized format if needed
+      const rewriteMap = new Map<string, RewriteVersion[]>();
+      if (rewrites) {
+        if (rewrites instanceof Map) {
+          (rewrites as Map<string, RewriteVersion[]>).forEach((value, key) => rewriteMap.set(key, value));
+        } else if (typeof rewrites === 'object') {
+          Object.entries(rewrites as Record<string, unknown>).forEach(([key, value]) => {
+            if (Array.isArray(value)) {
+              rewriteMap.set(key, value as RewriteVersion[]);
+            }
+          });
+        }
+      }
+      
+      // Show save dialog
+      const saveResult = await dialog.showSaveDialog(mainWindow, {
+        title: 'Export Manuscript',
+        defaultPath: options?.filename || `${manuscript.title || 'manuscript'}_export.txt`,
+        filters: [
+          { name: 'Text Files', extensions: ['txt'] },
+          { name: 'Markdown Files', extensions: ['md'] },
+          { name: 'All Files', extensions: ['*'] }
+        ],
+        properties: ['createDirectory', 'showOverwriteConfirmation']
+      });
+      
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { success: false, canceled: true };
+      }
+      
+      // Update options with selected path
+      const exportOptions: ExportOptions = {
+        ...(options || {}),
+        outputPath: path.dirname(saveResult.filePath),
+        filename: path.basename(saveResult.filePath)
+      };
+      
+      // Perform export
+      const result = await manuscriptExporter.exportManuscript(
+        manuscript,
+        rewriteMap,
+        exportOptions
+      );
+      
+      // Open file location if successful
+      if ((result as any).success && result.filePath) {
+        try { shell.showItemInFolder(result.filePath); } catch {}
+      }
+      
+      return result;
+      
+    } catch (error) {
+      console.error('[Handlers] Export error:', error);
+      return toErrorResponse(error, 'EXPORT_ERROR');
+    }
+  });
+
   // AI: Configure providers (Anthropic/OpenAI/Gemini)
   ipcMain.handle(IPC_CHANNELS.CONFIGURE_AI_PROVIDER, async (event: any, payload: any) => {
     try {

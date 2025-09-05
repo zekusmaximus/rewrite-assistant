@@ -23,26 +23,28 @@ export const SUPPORTED_FILE_TYPES = [
 ];
 
  // IPC channel names
-export const IPC_CHANNELS = {
-  LOAD_FILE: 'load-file',
-  LOAD_SPECIFIC_FILE: 'load-specific-file',
-  AUTO_LOAD_MANUSCRIPT: 'auto-load-manuscript',
-  SAVE_FILE: 'save-file',
-  FILE_LOADED: 'file-loaded',
-  FILE_SAVED: 'file-saved',
-  // AI service channels
-  ANALYZE_CONTINUITY: 'analyze-continuity',
-  CONFIGURE_AI_PROVIDER: 'configure-ai-provider',
-  GET_ANALYSIS_STATUS: 'get-analysis-status',
-  ERROR: 'error',
-  // Cache management channels
-  GET_CACHE_STATS: 'cache:get_stats',
-  CLEAR_ANALYSIS_CACHE: 'cache:clear_analysis_cache',
-  WARM_CACHE: 'cache:warm',
-  // Rewrite generation channels
-  GENERATE_REWRITE: 'rewrite:generate',
-  REWRITE_PROGRESS: 'rewrite:progress'
-};
+ export const IPC_CHANNELS = {
+   LOAD_FILE: 'load-file',
+   LOAD_SPECIFIC_FILE: 'load-specific-file',
+   AUTO_LOAD_MANUSCRIPT: 'auto-load-manuscript',
+   SAVE_FILE: 'save-file',
+   FILE_LOADED: 'file-loaded',
+   FILE_SAVED: 'file-saved',
+   // AI service channels
+   ANALYZE_CONTINUITY: 'analyze-continuity',
+   CONFIGURE_AI_PROVIDER: 'configure-ai-provider',
+   GET_ANALYSIS_STATUS: 'get-analysis-status',
+   ERROR: 'error',
+   // Cache management channels
+   GET_CACHE_STATS: 'cache:get_stats',
+   CLEAR_ANALYSIS_CACHE: 'cache:clear_analysis_cache',
+   WARM_CACHE: 'cache:warm',
+   // Rewrite generation channels
+   GENERATE_REWRITE: 'rewrite:generate',
+   REWRITE_PROGRESS: 'rewrite:progress',
+   // Export channels
+   EXPORT_WITH_REWRITES: 'file:export_with_rewrites'
+ };
 
 // Default manuscript file name
 export const DEFAULT_MANUSCRIPT_FILE = 'manuscript.txt';
