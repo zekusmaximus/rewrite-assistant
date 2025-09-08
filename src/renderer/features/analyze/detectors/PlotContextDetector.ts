@@ -1,5 +1,6 @@
 import type { Scene, ContinuityIssue, ReaderKnowledge } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
+import { enrichAnalysisRequest, runAnalysisWithOptionalConsensus } from '../../../../services/ai/consensus/ConsensusAdapter';
 import BaseDetector, { LocalDetectionResult } from './BaseDetector';
 
 /**
@@ -473,11 +474,23 @@ export default class PlotContextDetector extends BaseDetector<PlotDetectionTarge
     if (!targets || targets.length === 0) return [];
     const summary = (targets[0]?.registrySummary ?? []).slice(0, 8);
     console.debug('[PlotContextDetector] invoking AI for targets:', targets.length);
- 
-    const req = this.buildAIRequestComplex(scene, previousScenes, targets, summary);
+
+    const baseReq = this.buildAIRequestComplex(scene, previousScenes, targets, summary) as any;
+    const enriched = enrichAnalysisRequest(baseReq, {
+      scene,
+      detectorType: 'plot',
+      flags: { critical: Boolean((scene as any)?.critical) },
+    });
+
     try {
-      const resp = await aiManager.analyzeContinuity(req as any);
-      const mapped = this.mapAIPlotResponse(resp, targets, scene.text, summary);
+      const { issues } = await runAnalysisWithOptionalConsensus(aiManager, enriched as any, {
+        critical: Boolean((enriched as any)?.flags?.critical),
+        consensusCount: 2,
+        acceptThreshold: 0.5,
+        humanReviewThreshold: 0.9,
+        maxModels: 2,
+      });
+      const mapped = this.mapAIPlotResponse({ issues }, targets, scene.text, summary);
       console.debug('[PlotContextDetector] AI returned plot issues:', mapped.length);
       return mapped;
     } catch (err) {

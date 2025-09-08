@@ -1,5 +1,6 @@
 import type { Scene, ContinuityIssue, ReaderKnowledge } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
+import { enrichAnalysisRequest, runAnalysisWithOptionalConsensus } from '../../../../services/ai/consensus/ConsensusAdapter';
 import BaseDetector, { LocalDetectionResult } from './BaseDetector';
 
 /**
@@ -573,16 +574,29 @@ export default class CharacterDetector extends BaseDetector<CharacterDetectionTa
       const header = buildAIHeader(scene, targets, reg);
       const excerpt = buildSceneExcerpt(scene.text, targets, 1200);
       const lastPrev = previousScenes.slice(-1).map(s => ({ ...s, text: (s.text ?? '').slice(0, 800) }));
-      const req = {
+      const baseReq = {
         scene: { ...scene, text: `${header}\n\n${excerpt}` },
         previousScenes: lastPrev as Scene[],
         analysisType: 'consistency' as const,
         readerContext: buildReaderContext(registryKnownNames(reg)),
       } as Parameters<AIServiceManager['analyzeContinuity']>[0];
 
+      const enriched = enrichAnalysisRequest(baseReq as any, {
+        scene,
+        detectorType: 'character',
+        flags: { critical: Boolean((scene as any)?.critical) },
+      });
+
       console.debug('[CharacterDetector] invoking AI (consistency) for targets:', targets.length);
-      const resp = await aiManager.analyzeContinuity(req);
-      const out = mapAICharacterIssues(resp, scene.text, targets);
+      const { issues } = await runAnalysisWithOptionalConsensus(aiManager, enriched as any, {
+        critical: Boolean((enriched as any)?.flags?.critical),
+        consensusCount: 2,
+        acceptThreshold: 0.5,
+        humanReviewThreshold: 0.9,
+        maxModels: 2,
+      });
+
+      const out = mapAICharacterIssues({ issues }, scene.text, targets);
       console.debug('[CharacterDetector] AI returned character issues:', out.length);
       return out;
     } catch (err) {

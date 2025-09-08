@@ -1,5 +1,6 @@
 import type { Scene, ContinuityIssue } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
+import { enrichAnalysisRequest, runAnalysisWithOptionalConsensus } from '../../../../services/ai/consensus/ConsensusAdapter';
 import BaseDetector, { LocalDetectionResult } from './BaseDetector';
 
 interface OpeningStats {
@@ -242,15 +243,29 @@ export default class EngagementDetector extends BaseDetector<EngagementDetection
       body.push(cand.contextWindow);
       const textPayload = `${header}\n\n${body.join('\n')}`;
       const lastPrev = previousScenes.slice(-1).map(s => ({ ...s, text: (s.text ?? '').slice(0, 600) }));
-      const req = {
+      const baseReq = {
         scene: { ...scene, text: textPayload },
         previousScenes: lastPrev as Scene[],
         analysisType: 'full' as const,
         readerContext: buildReaderContextFromSummary(cand.previousSummary)
       } as Parameters<AIServiceManager['analyzeContinuity']>[0];
+
+      const enriched = enrichAnalysisRequest(baseReq as any, {
+        scene,
+        detectorType: 'engagement',
+        flags: { critical: Boolean((scene as any)?.critical) },
+      });
+
       console.debug('[EngagementDetector] invoking AI (full) for detection targets');
-      const resp = await aiManager.analyzeContinuity(req);
-      const out = mapAIEngagementIssues(resp, scene.text, cand.hookLine);
+      const { issues } = await runAnalysisWithOptionalConsensus(aiManager, enriched as any, {
+        critical: Boolean((enriched as any)?.flags?.critical),
+        consensusCount: 2,
+        acceptThreshold: 0.5,
+        humanReviewThreshold: 0.9,
+        maxModels: 2,
+      });
+
+      const out = mapAIEngagementIssues({ issues }, scene.text, cand.hookLine);
       console.debug('[EngagementDetector] AI returned engagement issues:', out.length);
       return out;
     } catch (err) {

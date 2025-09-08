@@ -8,7 +8,8 @@ import {
   TimeoutError,
 } from '../types';
 import CircuitBreaker, { backoffSchedule } from '../utils/CircuitBreaker';
-
+import { estimateTokensForModel } from '../utils/Tokenizers';
+import { estimateCost as estimateUsdCost } from '../optimization/Pricing';
 /**
  * Abstract base class for AI providers.
  * Handles:
@@ -21,6 +22,10 @@ export abstract class BaseProvider<C extends BaseProviderConfig> {
   protected readonly name: ProviderName;
   protected readonly config: C;
   protected readonly breaker: CircuitBreaker;
+
+  // Session-scoped token accounting (soft, in-memory)
+  private __sessionInputTokens = 0;
+  private __sessionOutputTokens = 0;
 
   constructor(name: ProviderName, config: C, breaker: CircuitBreaker) {
     this.name = name;
@@ -118,65 +123,129 @@ export abstract class BaseProvider<C extends BaseProviderConfig> {
   }
 
   /**
-   * Create a deterministic prompt that instructs the model to emit JSON only.
+   * Providers must build their own prompt payloads appropriate for their APIs.
+   * This base class no longer constructs a generic prompt.
    */
-  protected formatPrompt(req: AnalysisRequest): string {
-    const sceneSummary = {
-      id: req.scene.id,
-      text: req.scene.text,
-      wordCount: req.scene.wordCount,
-      position: req.scene.position,
-      originalPosition: req.scene.originalPosition,
-      characters: req.scene.characters,
-      timeMarkers: req.scene.timeMarkers,
-      locationMarkers: req.scene.locationMarkers,
-      hasBeenMoved: req.scene.hasBeenMoved,
-      rewriteStatus: req.scene.rewriteStatus,
-    };
+  protected abstract formatPrompt(req: AnalysisRequest): unknown;
 
-    const prevIds = req.previousScenes.map((s) => s.id);
-    const reader = {
-      knownCharacters: Array.from(req.readerContext.knownCharacters).sort(),
-      establishedTimeline: req.readerContext.establishedTimeline.map((t) => ({
-        label: t.label,
-        when: t.when ?? null,
-      })),
-      revealedPlotPoints: [...req.readerContext.revealedPlotPoints],
-      establishedSettings: req.readerContext.establishedSettings.map((l) => ({
-        name: l.name,
-        id: l.id ?? null,
-      })),
-    };
-
-    const instruction =
-      'You are a continuity analyst for fiction manuscripts. Analyze the current scene for continuity ' +
-      'issues considering the prior scenes and what a reader already knows. Only output strict JSON that matches ' +
-      'the specified schema. Do not include markdown fences or commentary.';
-
-    const schemaHint =
-      'Expected JSON shape: {"issues":[{"type":"pronoun|timeline|character|plot|context|engagement","severity":"must-fix|should-fix|consider","description":"string","textSpan":[start,end],"suggestedFix":"string?"}]}';
-
-    return [
-      instruction,
-      `AnalysisType: ${req.analysisType}`,
-      `PreviousSceneIDs: ${JSON.stringify(prevIds)}`,
-      `ReaderContext: ${JSON.stringify(reader)}`,
-      `Scene: ${JSON.stringify(sceneSummary)}`,
-      schemaHint,
-      'Respond with ONLY the JSON.',
-    ].join('\n');
+  /**
+   * Backward-compatible estimateCost used by existing providers.
+   * Reimplemented to use token-based pricing with heuristics.
+   * Note: Output tokens are not known here; this returns input-only estimate.
+   */
+  protected estimateCost(req: AnalysisRequest, _costTier: 'low' | 'medium' | 'high'): number {
+    const modelId = this.config.model ?? '';
+    const inputTokens = this.estimateInputTokensForRequest(modelId, req);
+    const { estimatedUSD } = estimateUsdCost(modelId || 'unknown', { inputTokens, outputTokens: 0 });
+    // Round to 6 decimals to be stable
+    return Math.round(estimatedUSD * 1e6) / 1e6;
   }
 
   /**
-   * Naive cost estimate based on character count and tier multiplier.
+   * Preferred cost estimator when token usage is available (or computed by caller).
    */
-  protected estimateCost(req: AnalysisRequest, costTier: 'low' | 'medium' | 'high'): number {
-    const charCount =
-      (req.scene.text?.length ?? 0) +
-      req.previousScenes.reduce((acc, s) => acc + (s.text?.length ?? 0), 0);
-    const tokens = Math.ceil(charCount / 4); // rough token estimate
-    const mult = costTier === 'high' ? 0.004 : costTier === 'medium' ? 0.002 : 0.001; // arbitrary unit cost
-    return Number((tokens * mult).toFixed(4));
+  protected estimateCostFromUsage(
+    modelId: string,
+    usage: { inputTokens: number; outputTokens?: number }
+  ): number {
+    const { estimatedUSD } = estimateUsdCost(modelId || 'unknown', usage);
+    return Math.round(estimatedUSD * 1e6) / 1e6;
+  }
+
+  /**
+   * Estimate input tokens for a request based on scene text and previous scenes.
+   * Deterministic, heuristic if tokenizer not available.
+   */
+  protected estimateInputTokensForRequest(modelId: string, req: AnalysisRequest): number {
+    const sceneText = req.scene?.text ?? '';
+    const prevTexts = (req.previousScenes ?? []).map((s) => s?.text ?? '');
+    let total = estimateTokensForModel(modelId, sceneText);
+    for (const t of prevTexts) total += estimateTokensForModel(modelId, t);
+    // small fixed overhead for separators/roles
+    total += 8;
+    return Math.max(1, total | 0);
+  }
+
+  /**
+   * Enforce optional input token budgets by trimming oldest previousScenes first.
+   * Returns possibly-trimmed request and trimming metadata. Defaults to no-op when budgets undefined.
+   * If HARD_FAIL_ON_BUDGET === 'true', throws ProviderError when input exceeds budget after best-effort trimming.
+   */
+  protected enforceInputBudget(
+    req: AnalysisRequest,
+    modelId?: string
+  ): { req: AnalysisRequest; meta?: { trimmed: true; trimmedCount: number; beforeTokens: number; afterTokens: number; budget: number } } {
+    const budgets = this.readBudgetsFromEnv();
+    const inBudget = budgets.maxInputTokensPerRequest;
+    if (!inBudget || inBudget <= 0) {
+      return { req };
+    }
+
+    // Compute current input tokens
+    const model = modelId ?? this.config.model ?? '';
+    const beforeTokens = this.estimateInputTokensForRequest(model, req);
+
+    if (beforeTokens <= inBudget) {
+      return { req };
+    }
+
+    // Trim previousScenes from oldest to newest until within budget, preserving full scene text
+    const clone: AnalysisRequest = {
+      ...req,
+      previousScenes: [...(req.previousScenes ?? [])],
+    };
+
+    let trimmedCount = 0;
+    while (clone.previousScenes.length > 0) {
+      clone.previousScenes.shift();
+      trimmedCount++;
+      const est = this.estimateInputTokensForRequest(model, clone);
+      if (est <= inBudget) {
+        const afterTokens = est;
+        // Update session accounting (soft)
+        this.__sessionInputTokens += afterTokens;
+        return {
+          req: clone,
+          meta: { trimmed: true, trimmedCount, beforeTokens, afterTokens, budget: inBudget },
+        };
+      }
+    }
+
+    // Could not fit under budget even after removing all previousScenes
+    const afterTokens = this.estimateInputTokensForRequest(model, {
+      ...clone,
+      previousScenes: [],
+    });
+    const hardFail = (process.env?.HARD_FAIL_ON_BUDGET ?? '').toLowerCase() === 'true';
+    if (hardFail && afterTokens > inBudget) {
+      throw new ProviderError(this.name, `Input token budget exceeded (after=${afterTokens}, budget=${inBudget})`, {
+        retriable: false,
+      });
+    }
+    this.__sessionInputTokens += afterTokens;
+    return {
+      req: { ...clone, previousScenes: [] },
+      meta: { trimmed: true, trimmedCount, beforeTokens, afterTokens, budget: inBudget },
+    };
+  }
+
+  /**
+   * Read optional budgets from environment. Undefined/NaN -> undefined.
+   */
+  private readBudgetsFromEnv(): {
+    maxInputTokensPerRequest?: number;
+    maxOutputTokensPerRequest?: number;
+    maxTokensPerSession?: number;
+  } {
+    const parseNum = (v: any): number | undefined => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? Math.trunc(n) : undefined;
+    };
+    return {
+      maxInputTokensPerRequest: parseNum(process.env?.MAX_INPUT_TOKENS_PER_REQUEST),
+      maxOutputTokensPerRequest: parseNum(process.env?.MAX_OUTPUT_TOKENS_PER_REQUEST),
+      maxTokensPerSession: parseNum(process.env?.MAX_TOKENS_PER_SESSION),
+    };
   }
 
   // Internals

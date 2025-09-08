@@ -16,11 +16,12 @@ import type {
 } from '../../shared/types';
 import type { AnalysisRequest } from '../ai/types';
 import type { AnalysisRequestExtension } from '../ai/types';
+import { enrichAnalysisRequest, runRewriteWithOptionalConsensus } from '../ai/consensus/ConsensusAdapter';
 
 export interface RewriteRequest {
   scene: Scene;
   issuesFound: ContinuityIssue[];        // Issues from Phase 2 analysis
-  readerContext: ReaderKnowledge;        // What reader knows at new position
+  readerContext: ReaderKnowledge;        // What the reader knows at new position
   previousScenes: Scene[];               // For context (max 3 scenes)
   preserveElements: string[];            // Elements that MUST stay unchanged
 }
@@ -76,7 +77,7 @@ class SceneRewriter {
       const analysisType = this.determineAnalysisType(request.issuesFound);
 
       // Create analysis request for AIServiceManager (intersection with extension)
-      const aiRequest: AnalysisRequest & AnalysisRequestExtension = {
+      const baseRequest: AnalysisRequest & AnalysisRequestExtension = {
         scene: request.scene,
         previousScenes: request.previousScenes.slice(-3), // Limit context
         analysisType,
@@ -86,8 +87,21 @@ class SceneRewriter {
         preserveElements: request.preserveElements,
       };
 
-      // Get rewrite from AI
-      const response = await this.aiManager.analyzeContinuity(aiRequest);
+      // Enrich request locally with stable taskType and meta; preserve PromptCache identity
+      const enriched = enrichAnalysisRequest(baseRequest as any, {
+        scene: request.scene,
+        detectorType: 'continuity_rewrite',
+        flags: { critical: this.isCriticalRewrite(request) },
+      });
+
+      // Run single model or consensus depending on criticality
+      const response = await runRewriteWithOptionalConsensus(this.aiManager, enriched as any, {
+        critical: Boolean((enriched as any)?.flags?.critical),
+        consensusCount: 2,
+        acceptThreshold: 0.5,
+        humanReviewThreshold: 0.9,
+        maxModels: 2,
+      });
 
       // Parse and structure the response
       return this.parseRewriteResponse(
@@ -175,6 +189,18 @@ Hard constraints:
     } else {
       return 'simple';       // e.g., cost-effective model
     }
+  }
+
+  // Local heuristic to decide if rewrite should use consensus
+  // - Explicit scene flag: (scene as any).critical === true
+  // - Or multiple must-fix issues
+  // - Or dependencies across >= 2 previous scenes
+  private isCriticalRewrite(req: RewriteRequest): boolean {
+    if ((req.scene as any)?.critical === true) return true;
+    const mustFixCount = req.issuesFound.filter(i => i.severity === 'must-fix').length;
+    if (mustFixCount >= 2) return true;
+    if ((req.previousScenes?.length ?? 0) >= 2) return true;
+    return false;
   }
 
   private parseRewriteResponse(

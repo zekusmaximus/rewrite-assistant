@@ -8,6 +8,9 @@ import {
   ValidationError,
 } from '../types';
 import { validateAndNormalize } from '../utils/ResponseValidator';
+import { buildClaudePrompt } from '../prompts/ClaudePrompts';
+import { estimateMessageTokens, estimateTokensForModel } from '../utils/Tokenizers';
+import { estimateCost as estimateUsdCost } from '../optimization/Pricing';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 
@@ -27,6 +30,17 @@ export class ClaudeProvider extends BaseProvider<ClaudeConfig> {
   }
 
   /**
+   * Build Anthropic-specific prompt payload using XML-style template.
+   */
+  protected formatPrompt(req: AnalysisRequest): string {
+    const readerContext = req.readerContext;
+    const previousScenes = req.previousScenes;
+    const newPosition = req.scene.position;
+    const sceneText = req.scene.text;
+    return buildClaudePrompt(readerContext, previousScenes, newPosition, sceneText);
+  }
+
+  /**
    * Execute continuity analysis via Anthropic Messages API.
    */
   public async analyze(req: AnalysisRequest): Promise<AnalysisResponse> {
@@ -39,7 +53,11 @@ export class ClaudeProvider extends BaseProvider<ClaudeConfig> {
       this.config.baseUrl?.trim() ||
       'https://api.anthropic.com/v1/messages';
 
-    const prompt = this.formatPrompt(req);
+    // Enforce optional budgets by trimming older previousScenes
+    const budgeted = this.enforceInputBudget(req, modelLabel);
+    const effReq = budgeted.req;
+
+    const prompt = this.formatPrompt(effReq) as string;
 
     const body = {
       model: modelLabel,
@@ -55,6 +73,12 @@ export class ClaudeProvider extends BaseProvider<ClaudeConfig> {
       temperature: 0.2,
     };
 
+    // Pre-flight estimate of input tokens using simplified message view
+    let inputTokensEstimate = estimateMessageTokens(modelLabel, [
+      { role: 'system', content: body.system },
+      { role: 'user', content: prompt },
+    ]);
+
     const headers: HeadersInit = {
       'content-type': 'application/json',
       'x-api-key': this.config.apiKey,
@@ -69,23 +93,57 @@ export class ClaudeProvider extends BaseProvider<ClaudeConfig> {
         body: JSON.stringify(body),
       });
 
-      const raw = (await res.json()) as unknown;
+      const raw = (await res.json()) as any;
       const normalized = validateAndNormalize('anthropic', raw, modelLabel);
 
+      // Prefer provider usage when available
+      if (raw && raw.usage && Number.isFinite(raw.usage.input_tokens)) {
+        inputTokensEstimate = Math.max(0, Number(raw.usage.input_tokens));
+      }
+
+      // Output tokens: prefer usage, else estimate from first content text
+      let outputText = '';
+      try {
+        outputText = raw?.content?.[0]?.text ?? '';
+      } catch {}
+      let outputTokensEstimate =
+        raw && raw.usage && Number.isFinite(raw.usage.output_tokens)
+          ? Math.max(0, Number(raw.usage.output_tokens))
+          : estimateTokensForModel(modelLabel, String(outputText ?? ''));
+
       const durationMs = Date.now() - started;
-      const costEstimate = this.estimateCost(req, costTierForModel(modelLabel));
+
+      const costEstimate = this.estimateCostFromUsage(modelLabel, {
+        inputTokens: inputTokensEstimate,
+        outputTokens: outputTokensEstimate,
+      });
+
+      const breakdown = estimateUsdCost(modelLabel, {
+        inputTokens: inputTokensEstimate,
+        outputTokens: outputTokensEstimate,
+      }).breakdown;
+
       const confidence = normalized.metadata.confidence ?? 0.5;
+
+      const meta: any = {
+        modelUsed: modelLabel,
+        provider: 'anthropic',
+        costEstimate,
+        durationMs,
+        confidence,
+        cached: false,
+      };
+      if (budgeted.meta) {
+        meta.trimmed = true;
+        meta.trimDetails = budgeted.meta;
+      }
+      meta.tokensInputEstimated = inputTokensEstimate;
+      meta.tokensOutputEstimated = outputTokensEstimate;
+      meta.costBreakdownUSD = breakdown;
 
       const out: AnalysisResponse = {
         issues: normalized.issues,
-        metadata: {
-          modelUsed: modelLabel,
-          provider: 'anthropic',
-          costEstimate,
-          durationMs,
-          confidence,
-          cached: false,
-        },
+        metadata: meta as AnalysisResponse['metadata'],
       };
 
       return out;

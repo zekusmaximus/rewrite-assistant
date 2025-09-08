@@ -16,7 +16,7 @@ A desktop application that helps authors rewrite scenes after manually reorderin
 ### 🚧 Future Phases (Not Yet Implemented)
 - **Phase 2**: Continuity Analysis - Identify issues when scenes are moved
 - **Phase 3**: AI-Powered Rewriting - Generate scene rewrites for new positions
-- **Phase 4**: Advanced Features - Polish and optimization
+- **Phase 4**: Advanced Features - Polish and reliability
 
 ## Installation
 
@@ -157,9 +157,99 @@ MIT License - See LICENSE file for details
 - Multiple manuscript support
 - Advanced scene splitting options
 - Export to various formats
-- Performance optimizations
+- Performance and reliability improvements
 
 ---
 
 **Note**: This is Phase 1 of the complete Rewrite Assistant vision. The application currently focuses on scene reordering functionality. Future phases will add continuity analysis and AI-powered rewriting capabilities.
 
+
+## LLM Capabilities Overview
+
+The app includes provider‑specific prompting, strict validation with normalization, adaptive routing, consensus for critical runs, and accurate cost management.
+
+- Model‑specific prompting and structured outputs
+  - Claude: XML‑structured prompts with chain‑of‑thought kept internal; JSON‑only output contract.
+    - See [buildClaudePrompt()](src/services/ai/prompts/ClaudePrompts.ts:9) and [ClaudeProvider.formatPrompt()](src/services/ai/providers/ClaudeProvider.ts:35)
+  - OpenAI: Markdown system message with few‑shot guidance; structured outputs via JSON Schema response_format.
+    - See [buildOpenAIPrompt()](src/services/ai/prompts/OpenAIPrompts.ts:44), [getOpenAIResponseFormat()](src/services/ai/prompts/OpenAIPrompts.ts:138), and [OpenAIProvider.formatPrompt()](src/services/ai/providers/OpenAIProvider.ts:33)
+  - Gemini: Instruction + parts layout with JSON‑only via response_mime_type when supported.
+    - See [buildGeminiPrompt()](src/services/ai/prompts/GeminiPrompts.ts:48) and [GeminiProvider.formatPrompt()](src/services/ai/providers/GeminiProvider.ts:44)
+
+- Validation and parsing reliability
+  - Strict Zod schemas with fallback repairs and normalization for spans, strings, evidence, and confidences.
+  - See [AnalysisResponseSchema](src/services/ai/schemas/ResponseSchemas.ts:27) and [validateAndNormalize()](src/services/ai/utils/ResponseValidator.ts:742)
+
+- Adaptive routing with performance tracking
+  - EMA tracking of confidence, latency, and success per model and taskType; confidence thresholds gate acceptance.
+  - See [ModelPerformanceTracker](src/services/ai/optimization/ModelPerformanceTracker.ts:78) and [selectModel()](src/services/ai/AIServiceManager.ts:481)
+
+- Multi‑model consensus (critical scenes only)
+  - Sequential multi‑model runs; reconciliation by voting on issue type/severity/span with confidence boosts for agreement.
+  - See [ValidationPipeline.runConsensus()](src/services/ai/validation/ValidationPipeline.ts:167)
+
+- Cost estimation and token budgets
+  - Token estimation, pricing table with overrides, and optional input budgets that trim oldest previous scenes first.
+  - See [estimateTokensForModel()](src/services/ai/utils/Tokenizers.ts:142), [estimateMessageTokens()](src/services/ai/utils/Tokenizers.ts:156), [getModelPricing()](src/services/ai/optimization/Pricing.ts:110), [estimateCost()](src/services/ai/optimization/Pricing.ts:119), and [BaseProvider.enforceInputBudget()](src/services/ai/providers/BaseProvider.ts:174)
+
+## Quickstart: Analysis and Rewrite Flows
+
+Run the app:
+1) npm install
+2) npm start
+
+Run tests:
+1) npm test
+2) For watch mode: npm run test:watch
+
+Read these focused guides next:
+- Prompting decisions: docs/Prompting Decisions.md
+- Performance and routing: docs/Performance Tuning Guide.md
+- Cost management and budgets: docs/Cost Management.md
+- Consensus and validation: docs/Consensus and Validation.md
+
+## Configuration Summary
+
+Environment variables (conservative defaults; budgets are off unless set):
+
+- MODEL_PRICING_JSON
+  - Override the pricing table used by cost estimation.
+  - Shape: {"model-id":{"inputPer1k":number,"outputPer1k":number,"currency":"USD"}}
+
+- MAX_INPUT_TOKENS_PER_REQUEST
+  - Soft cap on input tokens per request; if exceeded, trims oldest previousScenes before the current scene.
+  - Enforced by [BaseProvider.enforceInputBudget()](src/services/ai/providers/BaseProvider.ts:174)
+
+- MAX_OUTPUT_TOKENS_PER_REQUEST
+  - Reserved for future use; not strictly enforced yet.
+
+- MAX_TOKENS_PER_SESSION
+  - Session‑scoped soft accounting (informational).
+
+- HARD_FAIL_ON_BUDGET
+  - If "true", throws when input still exceeds the budget after best‑effort trimming.
+
+Optional batching for deduplication (not wired into providers by default):
+- [batchAnalyze()](src/services/ai/optimization/RequestBatcher.ts:10)
+
+Marking a run critical to activate consensus:
+- Use renderer‑side adapters with critical: true, which trigger consensus reconciliation for high‑stakes scenes:
+  - [runAnalysisWithOptionalConsensus()](src/services/ai/consensus/ConsensusAdapter.ts:109)
+  - [runRewriteWithOptionalConsensus()](src/services/ai/consensus/ConsensusAdapter.ts:167)
+- See docs/Consensus and Validation.md for details.
+
+## Reliability Targets and Measurement
+
+- JSON parsing reliability: Promote strict JSON‑only outputs via provider‑specific prompting; fallback repairs and Zod normalization cover edge cases.
+  - See [validateAndNormalize()](src/services/ai/utils/ResponseValidator.ts:742)
+- Latency target: Sub‑5s typical response for simple analyses.
+  - EMA‑based routing favors faster, reliable models under current conditions.
+  - See [ModelPerformanceTracker.score()](src/services/ai/optimization/ModelPerformanceTracker.ts:150)
+- Accuracy improvements: Driven by prompting decisions, routing heuristics, and consensus on critical runs rather than variability tuning.
+
+## Further Reading
+
+- Prompting Decisions: docs/Prompting Decisions.md
+- Performance Tuning Guide: docs/Performance Tuning Guide.md
+- Cost Management: docs/Cost Management.md
+- Consensus and Validation: docs/Consensus and Validation.md

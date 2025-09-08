@@ -1,5 +1,6 @@
 import type { Scene, ContinuityIssue, ReaderKnowledge } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
+import { enrichAnalysisRequest, runAnalysisWithOptionalConsensus } from '../../../../services/ai/consensus/ConsensusAdapter';
 import BaseDetector, { LocalDetectionResult } from './BaseDetector';
 
 /**
@@ -365,10 +366,22 @@ export default class PronounDetector extends BaseDetector<PronounDetectionTarget
     const prevForAI = previousScenes.slice(-2).map(s => ({ ...s, text: s.text?.slice(0, 600) ?? '' }));
 
     console.debug('[PronounDetector] invoking AI for targets:', targets.length);
-    const req = buildAIRequest(scene, prevForAI, targets, known);
-    const resp = await this.aiAnalyzeSimple(aiManager, req);
+    const baseReq = buildAIRequest(scene, prevForAI, targets, known);
+    const enriched = enrichAnalysisRequest(baseReq as any, {
+      scene,
+      detectorType: 'pronoun',
+      flags: { critical: Boolean((scene as any)?.critical) },
+    });
 
-    const out = mapAIResponseToIssues(resp, scene.text, targets);
+    const { issues } = await runAnalysisWithOptionalConsensus(aiManager, enriched as any, {
+      critical: Boolean((enriched as any)?.flags?.critical),
+      consensusCount: 2,
+      acceptThreshold: 0.5,
+      humanReviewThreshold: 0.9,
+      maxModels: 2,
+    });
+
+    const out = mapAIResponseToIssues({ issues }, scene.text, targets);
     console.debug('[PronounDetector] AI returned pronoun issues:', out.length);
     return out;
   }

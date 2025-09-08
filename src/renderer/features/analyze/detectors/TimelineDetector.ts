@@ -1,5 +1,6 @@
 import type { Scene, ContinuityIssue, ReaderKnowledge } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
+import { enrichAnalysisRequest, runAnalysisWithOptionalConsensus } from '../../../../services/ai/consensus/ConsensusAdapter';
 import BaseDetector, { LocalDetectionResult } from './BaseDetector';
 
 // ---------- Types (exported testing hooks) ----------
@@ -581,18 +582,33 @@ export default class TimelineDetector extends BaseDetector<TimelineDetectionTarg
       const reg = getOrBuildRegistry(previousScenes);
       const header = buildAIHeader(scene, targets, reg);
       const excerpt = buildSceneExcerptAroundTargets(scene.text, targets, 1200);
-      const prevExcerpt = previousScenes.length ? [{ ...previousScenes[previousScenes.length - 1], text: (previousScenes[previousScenes.length - 1].text ?? '').slice(0, 700) }] : [];
- 
-      const req = {
+      const prevExcerpt = previousScenes.length
+        ? [{ ...previousScenes[previousScenes.length - 1], text: (previousScenes[previousScenes.length - 1].text ?? '').slice(0, 700) }]
+        : [];
+
+      const baseReq = {
         scene: { ...scene, text: `${header}\n\n${excerpt}` },
         previousScenes: prevExcerpt as Scene[],
         analysisType: 'consistency' as const,
         readerContext: buildReaderContextMinimal(),
       } as Parameters<AIServiceManager['analyzeContinuity']>[0];
- 
+
+      const enriched = enrichAnalysisRequest(baseReq as any, {
+        scene,
+        detectorType: 'timeline',
+        flags: { critical: Boolean((scene as any)?.critical) },
+      });
+
       console.debug('[TimelineDetector] invoking AI (consistency) for targets:', targets.length);
-      const resp = await aiManager.analyzeContinuity(req);
-      const out = mapAITimelineIssues(resp, scene.text, targets);
+      const { issues } = await runAnalysisWithOptionalConsensus(aiManager, enriched as any, {
+        critical: Boolean((enriched as any)?.flags?.critical),
+        consensusCount: 2,
+        acceptThreshold: 0.5,
+        humanReviewThreshold: 0.9,
+        maxModels: 2,
+      });
+
+      const out = mapAITimelineIssues({ issues }, scene.text, targets);
       console.debug('[TimelineDetector] AI returned timeline issues:', out.length);
       return out;
     } catch (err) {

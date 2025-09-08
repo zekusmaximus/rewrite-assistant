@@ -1,5 +1,12 @@
-import { AnalysisResponse, ProviderName, ValidationError } from '../types';
+import { AnalysisResponse as AppAnalysisResponse, ProviderName, ValidationError } from '../types';
 import type { ContinuityIssue } from '../../../shared/types';
+import { z } from 'zod';
+import {
+  AnalysisResponseSchema as AnalysisResponseZodSchema,
+  type AnalysisResponse as ModelAnalysisResponse,
+  IssueTypeEnum,
+  SeverityEnum,
+} from '../schemas/ResponseSchemas';
 
 /**
  * Minimal parser interface compatible with previous .parse(...) usage.
@@ -9,7 +16,7 @@ type Parser<T> = {
   parse(value: unknown): T;
 };
 
-// ------------ Internal helpers and type guards ------------
+// ------------ Internal helpers and type guards (legacy compatibility) ------------
 
 const ISSUE_TYPES = ['pronoun', 'timeline', 'character', 'plot', 'context', 'engagement'] as const;
 const ISSUE_SEVERITIES = ['must-fix', 'should-fix', 'consider'] as const;
@@ -44,7 +51,7 @@ function isTextSpan(v: unknown): v is [number, number] {
 }
 
 /**
- * Runtime guard for ContinuityIssue.
+ * Runtime guard for ContinuityIssue (legacy ContinuityIssue used across app).
  */
 function isContinuityIssue(v: unknown): v is ContinuityIssue {
   if (!isObject(v)) return false;
@@ -128,7 +135,7 @@ function validateNormalizedMetadata(
   return out;
 }
 
-// ------------ Raw provider response shapes and guards ------------
+// ------------ Raw provider response shapes and guards (envelopes) ------------
 
 interface OpenAIChatMessage {
   role?: string;
@@ -269,12 +276,9 @@ export function geminiSchema(): Parser<GeminiResponse> {
   };
 }
 
-// ------------ Normalized response "schema" (public) ------------
-
 /**
- * Schema for normalized output. Allows partial metadata during parsing; defaults are applied later.
- * - issues: missing issues is treated as [] (empty array)
- * - metadata: optional; fields validated if present
+ * Legacy normalized response "schema" for ContinuityIssue[] (kept for compatibility).
+ * Public export maintained to avoid breaking external imports.
  */
 export function normalizedResponseSchema(): Parser<{
   issues: ContinuityIssue[];
@@ -333,13 +337,19 @@ export function normalizedResponseSchema(): Parser<{
   };
 }
 
-// ------------ Utilities ------------
+// ------------ Utilities: JSON extraction and sanitization ------------
 
 /**
  * Extract the first JSON object from arbitrary text using bracket counting.
  * Handles nested braces and ignores braces inside strings.
  */
 export function extractJsonFromText(text: string): string {
+  // Strip code fences if present
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch) {
+    text = fenceMatch[1];
+  }
+
   let start = -1;
   let depth = 0;
   let inString: false | '"' | "'" = false;
@@ -380,84 +390,406 @@ export function extractJsonFromText(text: string): string {
   throw new Error('No JSON object found in text');
 }
 
-// ------------ Main normalization ------------
-
-function extractTextPayload(provider: ProviderName, raw: unknown): string {
-  try {
-    if (provider === 'openai') {
-      const parsed = openAIChatSchema().parse(raw);
-      return parsed.choices[0].message.content;
-    }
-    if (provider === 'anthropic') {
-      const parsed = anthropicSchema().parse(raw);
-      return parsed.content[0].text;
-    }
-    // google
-    const parsed = geminiSchema().parse(raw);
-    const parts = parsed.candidates[0]?.content?.parts ?? [];
-    const firstWithText = parts.find(
-      (p: { text?: string }) => typeof p.text === 'string' && ((p.text?.length ?? 0) > 0)
-    );
-    if (!firstWithText || !firstWithText.text) {
-      throw new Error('No text part found in Gemini response');
-    }
-    return firstWithText.text;
-  } catch (e) {
-    // Surface schema mismatch for debugging
-    console.warn(`[ResponseValidator] ${provider} schema mismatch:`, e);
-    throw e;
-  }
+function stripBOM(s: string): string {
+  return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s;
 }
-
-function coerceToAnalysisResponse(
-  provider: ProviderName,
-  modelLabel: string,
-  candidate: unknown
-): AnalysisResponse {
-  const parsed = normalizedResponseSchema().parse(candidate);
-
-  const confidence =
-    (parsed.metadata && typeof parsed.metadata.confidence === 'number'
-      ? parsed.metadata.confidence
-      : undefined) ?? 0.5;
-
-  // Fill required metadata with defaults; cost/duration/cached are filled by providers/manager later
-  const normalized: AnalysisResponse = {
-    issues: parsed.issues,
-    metadata: {
-      modelUsed: modelLabel,
-      provider,
-      costEstimate: 0,
-      durationMs: 0,
-      confidence,
-      cached: false,
-    },
-  };
-  return normalized;
+function replaceSmartQuotes(s: string): string {
+  return s
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"');
+}
+function removeComments(s: string): string {
+  // Remove //... and /* ... */
+  return s.replace(/\/\/[^\n\r]*|\/\*[\s\S]*?\*\//g, '');
+}
+function removeTrailingCommas(s: string): string {
+  // Remove trailing commas before } or ]
+  return s.replace(/,(\s*[}\]])/g, '$1');
+}
+function fixSingleQuotedKeysAndStrings(s: string): string {
+  // 'key': value  -> "key": value
+  s = s.replace(/([{,\s])'([A-Za-z0-9_]+)'\s*:/g, '$1"$2":');
+  // :"value'like" -> conservative conversion for single-quoted string values
+  s = s.replace(/:\s*'([^'\\]*(?:\\.[^'\\]*)*)'/g, ': "$1"');
+  return s;
+}
+function quoteUnquotedKeys(s: string): string {
+  // { key: ... , another_key: ... } -> quote keys
+  return s.replace(/([{,\s])([A-Za-z_][A-Za-z0-9_]*)\s*:/g, '$1"$2":');
+}
+function sanitizeJsonLike(s: string, { quoteKeys = false }: { quoteKeys?: boolean } = {}): string {
+  let out = stripBOM(s);
+  out = replaceSmartQuotes(out);
+  out = removeComments(out);
+  out = removeTrailingCommas(out);
+  out = fixSingleQuotedKeysAndStrings(out);
+  if (quoteKeys) {
+    out = quoteUnquotedKeys(out);
+  }
+  return out;
 }
 
 /**
- * Validate provider raw response and normalize to AnalysisResponse.
- * - Applies provider-specific schema
- * - Extracts embedded JSON via robust extraction
- * - Validates normalized payload and applies safe defaults
- * - Throws ValidationError on failure
+ * Fallback slice for the outermost JSON object when strict extraction fails.
+ * Returns substring between the first '{' and the last '}' if present.
  */
+function sliceOuterJson(s: string): string | null {
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start !== -1 && end !== -1 && end > start) {
+    return s.slice(start, end + 1);
+  }
+  return null;
+}
+
+// ------------ Model response normalization and confidence scoring ------------
+
+export type ValidationMeta = { attempts: number; repaired: boolean; errors: string[] };
+
+function cleanText(s: string): string {
+  return s.replace(/[\x00-\x1F\x7F]/g, '').trim();
+}
+
+function clamp01(x: number): number {
+  if (!Number.isFinite(x)) return 0;
+  return Math.max(0, Math.min(1, x));
+}
+
+function normalizeModelData(parsed: ModelAnalysisResponse): ModelAnalysisResponse {
+  // Clone to avoid mutation of caller data
+  const data: ModelAnalysisResponse = {
+    issues: Array.isArray(parsed.issues) ? [...parsed.issues] : [],
+    summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+    confidence: typeof parsed.confidence === 'number' ? clamp01(parsed.confidence) : undefined,
+  };
+
+  data.summary = cleanText(data.summary);
+
+  const severityValues = SeverityEnum.options as readonly z.infer<typeof SeverityEnum>[];
+  const typeValues = IssueTypeEnum.options as readonly z.infer<typeof IssueTypeEnum>[];
+
+  data.issues = data.issues.map((issue: ModelAnalysisResponse['issues'][number]) => {
+    let severity = issue.severity;
+    // Case-insensitive severity coercion if needed (best-effort; schema enforces valid already)
+    const sevLower = String(severity).toLowerCase();
+    const sevCoerced = severityValues.find((v: z.infer<typeof SeverityEnum>) => v.toLowerCase() === sevLower) ?? severity;
+    severity = sevCoerced as typeof issue.severity;
+
+    let type = issue.type;
+    const typeLower = String(type).toLowerCase();
+    const typeCoerced =
+      typeValues.find((v: z.infer<typeof IssueTypeEnum>) => v.toLowerCase() === typeLower) ?? type;
+    type = typeCoerced as typeof issue.type;
+
+    // Span normalization
+    let span = issue.span ?? null;
+    if (span) {
+      const start = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.trunc(span.start_index)));
+      const end = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.trunc(span.end_index)));
+      span = {
+        start_index: Math.max(0, Math.min(start, end)),
+        end_index: Math.max(start, end),
+      };
+    }
+
+    // Strings cleanup
+    const explanation = cleanText(issue.explanation ?? '');
+    const suggested_fix = cleanText(issue.suggested_fix ?? '');
+
+    // Evidence cleanup, dedupe and cap
+    const seen = new Set<string>();
+    const evidence =
+      Array.isArray(issue.evidence) ? issue.evidence.map((e: string) => cleanText(e)).filter((e: string) => e.length > 0) : [];
+    const deduped: string[] = [];
+    for (const e of evidence) {
+      const key = e.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(e);
+      }
+      if (deduped.length >= 10) break;
+    }
+
+    // Confidence clamp if present
+    let conf = issue.confidence;
+    if (typeof conf === 'number') {
+      conf = clamp01(conf);
+    }
+
+    return {
+      type,
+      severity,
+      span: span ?? null,
+      explanation,
+      evidence: deduped,
+      suggested_fix,
+      confidence: conf,
+    };
+  });
+
+  // Backfill issue confidences heuristically if missing
+  const sevWeights: Record<z.infer<typeof SeverityEnum>, number> = {
+    low: 0.4,
+    medium: 0.6,
+    high: 0.8,
+    critical: 0.9,
+  };
+
+  data.issues = data.issues.map((issue: ModelAnalysisResponse['issues'][number]) => {
+    if (typeof issue.confidence === 'number') return issue;
+    let score = sevWeights[issue.severity] ?? 0.5;
+    const bonus = Math.min(0.1, (issue.evidence?.length ?? 0) * 0.02);
+    score += bonus;
+    if (issue.span && Number.isFinite(issue.span.start_index) && Number.isFinite(issue.span.end_index)) {
+      score += 0.05;
+    }
+    // Clamp into [0.35, 0.98]
+    score = Math.max(0.35, Math.min(0.98, score));
+    return { ...issue, confidence: clamp01(score) };
+  });
+
+  if (data.confidence === undefined) {
+    const confidences = data.issues.map((i: ModelAnalysisResponse['issues'][number]) => i.confidence ?? 0);
+    const mean = confidences.length ? confidences.reduce((a: number, b: number) => a + b, 0) / confidences.length : 0;
+    data.confidence = clamp01(mean);
+  }
+
+  return data;
+}
+
+// ------------ Parsing pipeline with retries and fallbacks ------------
+
+type ParseAttemptResult =
+  | { ok: true; data: ModelAnalysisResponse; meta: ValidationMeta }
+  | { ok: false; meta: ValidationMeta };
+
+function tryZodValidate(candidate: unknown): { ok: true; data: ModelAnalysisResponse } | { ok: false; error: string } {
+  const res = AnalysisResponseZodSchema.safeParse(candidate);
+  if (res.success) return { ok: true, data: res.data };
+  return { ok: false, error: res.error.errors.map((e: z.ZodIssue) => e.message).join('; ') };
+}
+
+function parseModelOutputToZod(raw: unknown, retries = 3): ParseAttemptResult {
+  const errors: string[] = [];
+  let attempts = 0;
+  let repaired = false;
+  let extractedSub: string | null = null;
+
+  // 0) Already-object case
+  if (isObject(raw)) {
+    attempts++;
+    const z = tryZodValidate(raw);
+    if (z.ok) {
+      return { ok: true, data: normalizeModelData(z.data), meta: { attempts, repaired, errors } };
+    } else {
+      errors.push(`Zod validation failed on object: ${z.error}`);
+      // Continue to stringify-sanitize attempts below
+    }
+  }
+
+  const rawStr = isString(raw) ? raw : (() => {
+    try {
+      return JSON.stringify(raw);
+    } catch {
+      return '';
+    }
+  })();
+
+  // Strategy 1: Strict JSON.parse on full string
+  attempts++;
+  try {
+    const candidate = JSON.parse(stripBOM(rawStr));
+    const z = tryZodValidate(candidate);
+    if (z.ok) {
+      return { ok: true, data: normalizeModelData(z.data), meta: { attempts, repaired, errors } };
+    }
+    errors.push(`Zod validation failed on strict JSON: ${z.error}`);
+  } catch (e) {
+    errors.push(`Strict JSON.parse failed: ${(e as Error)?.message ?? String(e)}`);
+  }
+
+  // Strategy 2: Extract first top-level JSON object substring (handles fences too)
+  attempts++;
+  try {
+    const jsonSub = extractJsonFromText(rawStr);
+    extractedSub = jsonSub;
+    if (jsonSub !== rawStr) repaired = true;
+    const candidate = JSON.parse(jsonSub);
+    const z = tryZodValidate(candidate);
+    if (z.ok) {
+      return { ok: true, data: normalizeModelData(z.data), meta: { attempts, repaired, errors } };
+    }
+    errors.push(`Zod validation failed on extracted JSON: ${z.error}`);
+  } catch (e) {
+    // Keep extractedSub as whatever was found (if any), but note failure
+    repaired = true;
+    errors.push(`Extraction/parse failed: ${(e as Error)?.message ?? String(e)}`);
+  }
+
+  // Strategy 3: Sanitize common issues (smart quotes, single quotes, trailing commas, comments)
+  attempts++;
+  try {
+    const base = extractedSub ?? sliceOuterJson(rawStr) ?? rawStr;
+    const sanitized = sanitizeJsonLike(base);
+    if (sanitized !== base) repaired = true;
+    const candidate = JSON.parse(sanitized);
+    const z = tryZodValidate(candidate);
+    if (z.ok) {
+      return { ok: true, data: normalizeModelData(z.data), meta: { attempts, repaired, errors } };
+    }
+    errors.push(`Zod validation failed after sanitize: ${z.error}`);
+  } catch (e) {
+    repaired = true;
+    errors.push(`Sanitize/parse failed: ${(e as Error)?.message ?? String(e)}`);
+  }
+
+  // Strategy 3b: Quote unquoted keys conservatively
+  attempts++;
+  try {
+    const base = extractedSub ?? sliceOuterJson(rawStr) ?? rawStr;
+    const sanitized = sanitizeJsonLike(base, { quoteKeys: true });
+    if (sanitized !== base) repaired = true;
+    const candidate = JSON.parse(sanitized);
+    const z = tryZodValidate(candidate);
+    if (z.ok) {
+      return { ok: true, data: normalizeModelData(z.data), meta: { attempts, repaired, errors } };
+    }
+    errors.push(`Zod validation failed after quoting keys: ${z.error}`);
+  } catch (e) {
+    repaired = true;
+    errors.push(`Quote-keys/parse failed: ${(e as Error)?.message ?? String(e)}`);
+  }
+
+  // Strategy 4: JSON5 (optional, skipped if not installed)
+  // Note: json5 is not in deps by default; skip silently.
+  // If added later, this can be enabled with a dynamic import.
+
+  // Respect retries cap (we have already performed multiple attempts)
+  if (attempts >= Math.max(1, retries)) {
+    return { ok: false, meta: { attempts, repaired, errors } };
+  }
+
+  return { ok: false, meta: { attempts, repaired, errors } };
+}
+
+// ------------ Provider payload extraction (envelopes) ------------
+
+function extractTextPayload(provider: ProviderName, raw: unknown): string {
+  if (provider === 'openai') {
+    const parsed = openAIChatSchema().parse(raw);
+    return parsed.choices[0].message.content;
+  }
+  if (provider === 'anthropic') {
+    const parsed = anthropicSchema().parse(raw);
+    return parsed.content[0].text;
+  }
+  // google
+  const parsed = geminiSchema().parse(raw);
+  const parts = parsed.candidates[0]?.content?.parts ?? [];
+  const firstWithText = parts.find(
+    (p: { text?: string }) => typeof p.text === 'string' && ((p.text?.length ?? 0) > 0)
+  );
+  if (!firstWithText || !firstWithText.text) {
+    throw new Error('No text part found in Gemini response');
+  }
+  return firstWithText.text;
+}
+
+// ------------ Mapping to application-level AnalysisResponse (legacy) ------------
+
+function mapIssueTypeToLegacy(t: z.infer<typeof IssueTypeEnum>): ContinuityIssue['type'] {
+  switch (t) {
+    case 'pronoun_reference':
+      return 'pronoun';
+    case 'timeline':
+      return 'timeline';
+    case 'character_knowledge':
+      return 'character';
+    case 'other':
+    default:
+      return 'context';
+  }
+}
+
+function mapSeverityToLegacy(s: z.infer<typeof SeverityEnum>): ContinuityIssue['severity'] {
+  switch (s) {
+    case 'low':
+      return 'consider';
+    case 'medium':
+      return 'should-fix';
+    case 'high':
+    case 'critical':
+    default:
+      return 'must-fix';
+  }
+}
+
+function modelToLegacyIssues(data: ModelAnalysisResponse): ContinuityIssue[] {
+  return (data.issues ?? []).map((i: ModelAnalysisResponse['issues'][number]) => {
+    const start = i.span?.start_index ?? 0;
+    const end = i.span?.end_index ?? Math.max(0, start);
+    return {
+      type: mapIssueTypeToLegacy(i.type),
+      severity: mapSeverityToLegacy(i.severity),
+      description: i.explanation ?? '',
+      textSpan: [Math.max(0, Math.trunc(start)), Math.max(0, Math.trunc(end))],
+      suggestedFix: i.suggested_fix ? String(i.suggested_fix) : undefined,
+    };
+  });
+}
+
+// ------------ Public API (overloaded) ------------
+
+export function validateAndNormalize(
+  raw: unknown,
+  options?: { retries?: number }
+): { data: ModelAnalysisResponse; meta: ValidationMeta };
 export function validateAndNormalize(
   provider: ProviderName,
   raw: unknown,
   fallbackModelLabel: string
-): AnalysisResponse {
-  try {
-    const payloadText = extractTextPayload(provider, raw);
-    const jsonStr = extractJsonFromText(payloadText);
-    const candidate = JSON.parse(jsonStr) as unknown;
-    return coerceToAnalysisResponse(provider, fallbackModelLabel, candidate);
-  } catch (err) {
-    console.warn(
-      `[ResponseValidator] Failed to validate/normalize ${provider} response for model "${fallbackModelLabel}":`,
-      err
-    );
-    throw new ValidationError(provider, 'Response validation failed');
+): AppAnalysisResponse;
+// Implementation
+export function validateAndNormalize(
+  a: unknown,
+  b?: unknown,
+  c?: unknown
+): { data: ModelAnalysisResponse; meta: ValidationMeta } | AppAnalysisResponse {
+  // Overload dispatcher
+  if (isProviderName(a)) {
+    // Legacy API: (provider, raw, fallbackModelLabel) -> AppAnalysisResponse
+    const provider = a as ProviderName;
+    const raw = b as unknown;
+    const fallbackModelLabel = String(c ?? '');
+    try {
+      const payloadText = extractTextPayload(provider, raw);
+      const result = parseModelOutputToZod(payloadText, 4);
+      if (!result.ok) {
+        throw new ValidationError(provider, 'Response validation failed');
+      }
+      const modelData = result.data; // already normalized and confidences filled
+      const legacy: AppAnalysisResponse = {
+        issues: modelToLegacyIssues(modelData),
+        metadata: {
+          modelUsed: fallbackModelLabel,
+          provider,
+          costEstimate: 0,
+          durationMs: 0,
+          confidence: typeof modelData.confidence === 'number' ? modelData.confidence : 0,
+          cached: false,
+        },
+      };
+      return legacy;
+    } catch {
+      throw new ValidationError(a as ProviderName, 'Response validation failed');
+    }
+  } else {
+    // New primary API: (raw, options?) -> { data, meta }
+    const retries = isObject(b) && isNumberFinite((b as any).retries) ? Math.max(1, Math.trunc((b as any).retries)) : 4;
+    const result = parseModelOutputToZod(a, retries);
+    if (!result.ok) {
+      return { data: { issues: [], summary: '', confidence: 0 }, meta: result.meta };
+    }
+    return { data: result.data, meta: result.meta };
   }
 }
