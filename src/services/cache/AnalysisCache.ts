@@ -10,7 +10,7 @@
  * Note: We intentionally avoid integrating into other subsystems in this subtask.
  */
 
-import { createHash } from 'crypto';
+import { sha256 } from 'js-sha256';
 import type { Scene, ReaderKnowledge, ContinuityAnalysis } from '../../shared/types';
 import type { CacheKey, CachedAnalysis, CacheStats } from './types';
 import SemanticHasher from './SemanticHasher';
@@ -44,7 +44,7 @@ function stableStringify(value: any): string {
 }
 
 function sha256Hex(input: string): string {
-  return createHash('sha256').update(input).digest('hex');
+  return sha256(input);
 }
 
 export default class AnalysisCache {

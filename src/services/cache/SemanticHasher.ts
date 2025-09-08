@@ -7,7 +7,7 @@
  * Test hooks are exposed as public underscore-prefixed methods.
  */
 
-import { createHash } from 'crypto';
+import { sha256 } from 'js-sha256';
 import type { Scene, ReaderKnowledge } from '../../shared/types';
 import type { CacheKey } from './types';
 
@@ -58,7 +58,7 @@ function stableStringify(value: any): string {
 
 // Utility: sha256 hex digest
 function sha256Hex(input: string): string {
-  return createHash('sha256').update(input).digest('hex');
+  return sha256(input);
 }
 
 // Normalize common Unicode punctuation to ASCII equivalents
