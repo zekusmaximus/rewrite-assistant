@@ -10,6 +10,7 @@ import type { ContinuityIssue } from '../../shared/types';
 import RewritePanel from '../features/rewrite/components/RewritePanel';
 import { useSettingsStore } from '../features/settings/stores';
 import { SettingsModal } from '../features/settings/components';
+import ExportDialog from '../features/export/components/ExportDialog';
  
 const App: React.FC = () => {
   const { 
@@ -29,6 +30,7 @@ const App: React.FC = () => {
   // Local Issues panel state and analysis hook
   const [issuesOpen, setIssuesOpen] = useState(false);
   const [rewritePanelOpen, setRewritePanelOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const sceneViewerRef = useRef<SceneViewerHandle | null>(null);
   const { analyzeMovedScenes } = useAnalysis();
   const { isSettingsOpen, openSettings } = useSettingsStore();
@@ -209,6 +211,13 @@ const App: React.FC = () => {
                   Save
                 </button>
                 <button
+                  onClick={() => setExportDialogOpen(true)}
+                  className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 border border-transparent rounded-md hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  title="Export manuscript with rewrites"
+                >
+                  📤 Export
+                </button>
+                <button
                   onClick={async () => {
                     setIssuesOpen(true);
                     await analyzeMovedScenes();
@@ -313,6 +322,12 @@ const App: React.FC = () => {
       )}
 
       {isSettingsOpen && <SettingsModal />}
+      {exportDialogOpen && (
+        <ExportDialog
+          isOpen={exportDialogOpen}
+          onClose={() => setExportDialogOpen(false)}
+        />
+      )}
     </div>
   );
 };
