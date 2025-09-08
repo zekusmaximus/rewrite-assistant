@@ -408,6 +408,42 @@ export function setupIPCHandlers(): void {
     }
   });
 
+  // AI: Test provider configuration (lightweight, no network)
+  ipcMain.handle('test-ai-provider', async (_event, payload: any) => {
+    try {
+      const invalid = () => ({ ok: false as const, error: { message: 'Invalid configuration', code: 'INVALID_CONFIG' } });
+
+      if (!payload || typeof payload !== 'object') return invalid();
+      const { provider, config } = payload as { provider?: string; config?: any };
+
+      const allowed = new Set(['claude', 'openai', 'gemini']);
+      if (typeof provider !== 'string' || !allowed.has(provider)) return invalid();
+
+      if (!config || typeof config !== 'object') return invalid();
+      const apiKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : '';
+      if (!apiKey || apiKey.length < 20) return invalid();
+
+      if (config.model !== undefined) {
+        if (typeof config.model !== 'string' || !config.model.trim()) return invalid();
+      }
+
+      if (config.baseUrl !== undefined) {
+        if (typeof config.baseUrl !== 'string') return invalid();
+        const base = config.baseUrl.trim();
+        if (base && !/^https?:\/\//i.test(base)) return invalid();
+      }
+
+      // Artificial async delay ~100-200ms
+      const delay = 100 + Math.floor(Math.random() * 100);
+      await new Promise((r) => setTimeout(r, delay));
+
+      return { ok: true as const };
+    } catch {
+      // Do not log secrets or payload
+      return { ok: false as const, error: { message: 'Invalid configuration', code: 'INVALID_CONFIG' } };
+    }
+  });
+
   // AI: Analyze continuity
   ipcMain.handle(IPC_CHANNELS.ANALYZE_CONTINUITY, async (event: any, payload: any) => {
     try {

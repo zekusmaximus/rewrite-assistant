@@ -8,6 +8,8 @@ import IssuePanel from '../features/analyze/components/IssuePanel';
 import useAnalysis from '../features/analyze/hooks/useAnalysis';
 import type { ContinuityIssue } from '../../shared/types';
 import RewritePanel from '../features/rewrite/components/RewritePanel';
+import { useSettingsStore } from '../features/settings/stores';
+import { SettingsModal } from '../features/settings/components';
  
 const App: React.FC = () => {
   const { 
@@ -29,6 +31,7 @@ const App: React.FC = () => {
   const [rewritePanelOpen, setRewritePanelOpen] = useState(false);
   const sceneViewerRef = useRef<SceneViewerHandle | null>(null);
   const { analyzeMovedScenes } = useAnalysis();
+  const { isSettingsOpen, openSettings } = useSettingsStore();
 
   // Auto-load manuscript.txt on startup
   useEffect(() => {
@@ -221,6 +224,12 @@ const App: React.FC = () => {
                 >
                   Rewrite Panel
                 </button>
+                <button
+                  onClick={openSettings}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  ⚙️ Settings
+                </button>
               </>
             )}
           </div>
@@ -302,6 +311,8 @@ const App: React.FC = () => {
           />
         </div>
       )}
+
+      {isSettingsOpen && <SettingsModal />}
     </div>
   );
 };
