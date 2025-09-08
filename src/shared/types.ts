@@ -23,6 +23,10 @@ export interface Scene {
    * Optional to avoid impacting existing flows; present when analysis has been performed.
    */
   continuityAnalysis?: ContinuityAnalysis;
+
+  // Optional rewrite history metadata
+  rewriteHistory?: RewriteVersion[];
+  lastRewriteTimestamp?: number;
 }
 
 // Issues when scenes move
@@ -40,26 +44,66 @@ export interface ContinuityIssue {
 * Replace them with canonical definitions if/when they are introduced elsewhere.
 */
 
-// Placeholder TimelineEvent interface if not defined elsewhere
+/**
+ * A narrative timeline event known to the reader.
+ * Notes:
+ * - id is optional; provide when deduplication or updates are required.
+ * - when should be an ISO-8601 string for stable lexicographic ordering when available.
+ *   Epoch milliseconds are acceptable; prefer strings for consistency and readability.
+ * - timestamp is deprecated; prefer when. If both present, when should be treated as source of truth.
+ */
 export interface TimelineEvent {
- /**
-  * TODO: Replace this placeholder with the application's canonical TimelineEvent
-  * definition when available. Kept minimal for backward compatibility.
-  */
- label: string;
- /** Optional ISO 8601 timestamp or human-readable marker. */
- when?: string;
+  /** Optional stable identifier for cross-referencing or deduplication */
+  id?: string;
+  /** Human-readable label, e.g., Day 1, Next morning, 2025-01-01 */
+  label: string;
+  /**
+   * Absolute or relative time:
+   * - ISO-8601 date or datetime string preferred (e.g., 2025-01-01 or 2025-01-01T00:00:00Z)
+   * - Epoch milliseconds accepted when needed
+   * - null indicates unknown/unspecified
+   */
+  when?: string | number | null;
+
+  /** Optional freeform narrative details */
+  description?: string;
+  /** Optional backreference to the originating scene */
+  sceneId?: string;
+
+  /** Classification of timing semantics */
+  type?: 'absolute' | 'relative' | 'narrative';
+  /** Raw relative cue when type is relative, e.g., next morning */
+  relativeMarker?: string;
+  /** Narrative ordering index when no absolute time exists */
+  narrativePosition?: number;
+
+  /**
+   * Deprecated in favor of when. If present, treat as epoch ms equivalent.
+   */
+  timestamp?: number;
 }
 
-// Placeholder Location interface if not defined elsewhere
+/**
+ * A setting/location known to the reader.
+ * Notes:
+ * - id is optional; supply when available for joins, dedupe, or UI selection.
+ */
 export interface Location {
- /**
-  * TODO: Replace this placeholder with the application's canonical Location
-  * definition when available. Kept minimal for backward compatibility.
-  */
- name: string;
- /** Optional unique identifier for the location. */
- id?: string;
+  /** Optional stable identifier for joins/deduplication */
+  id?: string;
+  /** Display name as referenced in text */
+  name: string;
+
+  /** Optional descriptive details */
+  description?: string;
+  /** Scene id where first mentioned (if tracked) */
+  firstMentionedIn?: string;
+  /** Alternate names or spellings */
+  aliases?: string[];
+  /** Broad category for formatting/use */
+  type?: 'interior' | 'exterior' | 'abstract';
+  /** Parent location id/name for hierarchical relations */
+  parentLocation?: string;
 }
 
 /**
@@ -110,7 +154,7 @@ export interface Manuscript {
 // IPC message types for communication between main and renderer processes
 export interface IPCMessage {
  type: string;
- payload?: any;
+ payload?: unknown;
 }
 
 export interface LoadFileMessage extends IPCMessage {
@@ -152,12 +196,3 @@ export interface DiffSegment {
   relatedIssueId?: string;
 }
 
-// Extend the existing Scene interface with optional rewrite fields
-// Use TypeScript interface merging to avoid editing the original declaration
-export interface SceneRewriteExtension {
-  rewriteHistory?: RewriteVersion[];
-  lastRewriteTimestamp?: number;
-}
-
-// Merge these fields into the existing Scene via declaration merging
-export interface Scene extends SceneRewriteExtension {}

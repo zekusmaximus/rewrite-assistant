@@ -4,7 +4,7 @@
 export type ProviderName = 'claude' | 'openai' | 'gemini';
 
 // Minimal provider configuration shape for store usage.
-// Do NOT log secrets. TODO: Phase 2/3 - move secrets to main process with Electron safeStorage and IPC.
+// Do NOT log secrets.
 export interface ProviderConfig {
   enabled: boolean;
   apiKey: string;

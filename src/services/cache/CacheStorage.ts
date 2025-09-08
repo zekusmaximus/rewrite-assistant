@@ -23,7 +23,7 @@ const L2_MAX_ROWS = 1000;
 // Dynamic require helper
 const dynamicRequire: NodeRequire | null = (() => {
   try {
-    // eslint-disable-next-line no-eval
+     
     return eval('require');
   } catch {
     return null;
@@ -253,7 +253,7 @@ export default class CacheStorage {
       // Disable L2 for session
       this.l2Available = false;
       this.l2Db = null;
-      // eslint-disable-next-line no-console
+       
       console.warn('[CacheStorage] SQLite unavailable, continuing with memory-only.', err);
     }
   }
@@ -313,7 +313,7 @@ export default class CacheStorage {
       await this.enforceL2Capacity();
     } catch (err) {
       // Disable L2 on persistent failure, do not throw
-      // eslint-disable-next-line no-console
+       
       console.warn('[CacheStorage] set failed, proceeding with memory-only.', err);
       this.l2Available = false;
       this.l2Db = null;
@@ -400,7 +400,7 @@ export default class CacheStorage {
       // Disable L2 on error
       this.l2Available = false;
       this.l2Db = null;
-      // eslint-disable-next-line no-console
+       
       console.warn('[CacheStorage] getRowFromSQLite failed, disabling L2.', err);
       return null;
     }
@@ -450,7 +450,7 @@ export default class CacheStorage {
       // Disable L2 on persistent failure
       this.l2Available = false;
       this.l2Db = null;
-      // eslint-disable-next-line no-console
+       
       console.warn('[CacheStorage] setToSQLite failed, disabling L2.', err);
     }
   }
@@ -468,7 +468,7 @@ export default class CacheStorage {
       // Disable L2 on error
       this.l2Available = false;
       this.l2Db = null;
-      // eslint-disable-next-line no-console
+       
       console.warn('[CacheStorage] deleteFromSQLite failed, disabling L2.', err);
     }
   }
@@ -493,7 +493,7 @@ export default class CacheStorage {
       }
     } catch (err) {
       // ignore; not critical
-      // eslint-disable-next-line no-console
+       
       console.warn('[CacheStorage] enforceL2Capacity warning:', err);
     }
   }
@@ -505,7 +505,7 @@ export default class CacheStorage {
       this.l2Db.prepare('DELETE FROM analysis_cache WHERE cached_at < ?').run(cutoff);
     } catch (err) {
       // ignore
-      // eslint-disable-next-line no-console
+       
       console.warn('[CacheStorage] cleanupExpired warning:', err);
     }
   }

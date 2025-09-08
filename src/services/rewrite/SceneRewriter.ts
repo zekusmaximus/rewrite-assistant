@@ -14,8 +14,8 @@ import type {
   ContinuityIssue,
   ReaderKnowledge,
 } from '../../shared/types';
-import type { AnalysisRequest } from '../ai/types';
-import type { AnalysisRequestExtension } from '../ai/types';
+import type { AnalysisRequest , AnalysisRequestExtension } from '../ai/types';
+
 import { enrichAnalysisRequest, runRewriteWithOptionalConsensus } from '../ai/consensus/ConsensusAdapter';
 
 export interface RewriteRequest {
@@ -112,7 +112,7 @@ class SceneRewriter {
 
     } catch (error) {
       // Ensure original text is not lost; fail safely with structured error
-      // eslint-disable-next-line no-console
+       
       console.error('[SceneRewriter] Rewrite failed:', error);
       return {
         success: false,

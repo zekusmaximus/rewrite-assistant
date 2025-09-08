@@ -94,7 +94,7 @@ class ManuscriptExporter {
       };
       
     } catch (error) {
-      // eslint-disable-next-line no-console
+       
       console.error('[ManuscriptExporter] Export error:', error);
       return {
         success: false,

@@ -128,7 +128,7 @@ class RewriteOrchestrator {
             progress.errors.set(sceneId, result.error || 'Unknown error');
           }
         } catch (error) {
-          // eslint-disable-next-line no-console
+           
           console.error(`[RewriteOrchestrator] Failed to rewrite scene ${sceneId}:`, error);
           progress.errors.set(sceneId, error instanceof Error ? error.message : 'Unknown error');
         }
@@ -146,7 +146,7 @@ class RewriteOrchestrator {
       progress.message = this.generateCompletionMessage(progress);
 
     } catch (error) {
-      // eslint-disable-next-line no-console
+       
       console.error('[RewriteOrchestrator] Batch rewrite error:', error);
       progress.phase = 'error';
       progress.message = 'Batch rewrite failed';

@@ -16,6 +16,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   testProvider: (provider: string, config: any) =>
     ipcRenderer.invoke('test-ai-provider', { provider, config }),
   
+  // Settings (secure, via main process)
+  loadSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_LOAD),
+  saveSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SAVE, settings),
+  testConnection: (params: any) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_TEST_CONNECTION, params),
+  
   // Platform info
   platform: process.platform,
   
@@ -50,7 +55,12 @@ declare global {
        provider: string,
        config: any
      ) => Promise<{ ok: boolean; error?: { message: string; code: string } }>;
-
+ 
+     // Settings
+     loadSettings: () => Promise<any>;
+     saveSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
+     testConnection: (params: any) => Promise<{ success: boolean; error?: string }>;
+ 
      // Env info
      platform: string;
      versions: {

@@ -11,6 +11,9 @@ export interface SettingsState {
   // Provider configurations (in-memory only)
   providers: ProvidersConfigMap;
 
+  // Optional general settings bag (persisted via IPC when present)
+  general?: Record<string, any>;
+
   // UI state
   isSettingsOpen: boolean;
   activeTab: string;
@@ -23,11 +26,11 @@ export interface SettingsState {
   closeSettings: () => void;
   setActiveTab: (tab: string) => void;
   updateProvider: (provider: ProviderName, partial: Partial<ProviderConfig>) => void;
-  testConnection: (provider: ProviderName) => void;
+  testConnection: (provider: ProviderName) => Promise<void>;
 
-  // Lifecycle (placeholders for Phase 1)
+  // Lifecycle
   saveSettings: () => Promise<boolean>;
-  loadSettings: () => void;
+  loadSettings: () => Promise<void>;
 }
 
 const defaultProvider = (): ProviderConfig => ({
@@ -81,31 +84,62 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       };
     }),
 
-  testConnection: (provider: ProviderName) => {
-    // Phase 1: Simulate a short "testing" state and revert to idle.
-    set((state) => ({
-      testResults: { ...state.testResults, [provider]: 'testing' },
+  testConnection: async (provider: ProviderName) => {
+    const state = get();
+    const config = state.providers[provider];
+    if (!config || !config.apiKey) return;
+
+    set((s) => ({
+      testResults: { ...s.testResults, [provider]: 'testing' },
     }));
-    setTimeout(() => {
-      // Back to idle; no real network call in Phase 1.
-      set((state) => ({
-        testResults: { ...state.testResults, [provider]: 'idle' },
+
+    try {
+      const result = await window.electronAPI.testConnection({ provider, config });
+      set((s) => ({
+        testResults: {
+          ...s.testResults,
+          [provider]: result.success ? 'success' : 'error',
+        },
       }));
-    }, 800);
+    } catch {
+      set((s) => ({
+        testResults: { ...s.testResults, [provider]: 'error' },
+      }));
+    }
   },
 
   saveSettings: async () => {
-    // Phase 1: No persistence. Return success immediately.
-    // TODO(Phase 2/3): Send sanitized config to main via IPC for secure storage with safeStorage.
-    return true;
+    const state = get();
+    try {
+      const result = await window.electronAPI.saveSettings({
+        providers: state.providers,
+        general: state.general ?? {} // retain or add general settings if present
+      });
+      return result.success;
+    } catch (error) {
+      console.error('Failed to save settings');
+      return false;
+    }
   },
 
-  loadSettings: () => {
-    // Phase 1: Initialize defaults (no persistence).
-    set({
-      providers: { ...DEFAULT_PROVIDERS },
-      testResults: { ...DEFAULT_TEST_RESULTS },
-      activeTab: 'api-keys',
-    });
+  loadSettings: async () => {
+    try {
+      const settings = await window.electronAPI.loadSettings();
+      if (settings && settings.providers) {
+        set({
+          providers: settings.providers,
+          general: settings.general ?? get().general,
+          testResults: DEFAULT_TEST_RESULTS,
+          activeTab: 'api-keys',
+        });
+      }
+    } catch {
+      // Use defaults on error
+      set({
+        providers: { ...DEFAULT_PROVIDERS },
+        testResults: { ...DEFAULT_TEST_RESULTS },
+        activeTab: 'api-keys',
+      });
+    }
   },
 }));

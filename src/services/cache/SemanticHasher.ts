@@ -14,7 +14,7 @@ import type { CacheKey } from './types';
 // Dynamic require helpers to avoid bundler issues in renderer and keep deps optional at this stage.
 const dynamicRequire: NodeRequire | null = (() => {
   try {
-    // eslint-disable-next-line no-eval
+     
     return eval('require');
   } catch {
     return null;

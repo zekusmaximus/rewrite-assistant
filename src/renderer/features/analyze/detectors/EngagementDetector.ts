@@ -100,7 +100,7 @@ export function summarizePreviousContext(previousScenes: readonly Scene[]): Prev
   const characters = (() => {
     try {
       // Attempt compromise if available
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+       
       const mod = require('compromise');
       const nlp = (mod?.default ?? mod) as any;
       const doc = typeof nlp === 'function' ? nlp(joined) : null;

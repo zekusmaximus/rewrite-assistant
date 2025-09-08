@@ -163,8 +163,14 @@ const ProviderBlock: React.FC<{
 };
 
 const SettingsModal: React.FC = () => {
-  const { closeSettings, activeTab, setActiveTab, saveSettings, providers } = useSettingsStore();
+  const { closeSettings, activeTab, setActiveTab, saveSettings, providers, isSettingsOpen, loadSettings } = useSettingsStore();
   const { configureProviders } = useAPIConfiguration();
+
+  useEffect(() => {
+    if (isSettingsOpen) {
+      loadSettings();
+    }
+  }, [isSettingsOpen, loadSettings]);
 
   // Compute validation errors locally (do not store in Zustand)
   const validationMap: Record<ProviderName, ValidationErrors> = useMemo(() => {
@@ -209,16 +215,21 @@ const SettingsModal: React.FC = () => {
   }, [providers, saveSettings, configureProviders, validationMap]);
 
   const handleSave = async () => {
-    await saveSettings();
-    const eligible: ProvidersConfigMap = {};
-    for (const name of PROVIDERS) {
-      const cfg = ensureConfig(providers[name]);
-      const errs = validationMap[name];
-      if (cfg.enabled && isNonEmpty(cfg.apiKey) && !errs.apiKey && !errs.model) {
-        eligible[name] = cfg as any;
+    const success = await saveSettings();
+    if (success) {
+      const eligible: ProvidersConfigMap = {};
+      for (const name of PROVIDERS) {
+        const cfg = ensureConfig(providers[name]);
+        const errs = validationMap[name];
+        if (cfg.enabled && isNonEmpty(cfg.apiKey) && !errs.apiKey && !errs.model) {
+          eligible[name] = cfg as any;
+        }
       }
+      await configureProviders(eligible);
+      closeSettings();
+    } else {
+      console.error('Failed to save settings');
     }
-    await configureProviders(eligible);
   };
 
   return (

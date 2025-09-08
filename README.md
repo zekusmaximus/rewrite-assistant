@@ -156,6 +156,18 @@ Notes
 - Keys are only used locally. Validation avoids logging secrets.
 - The app routes to cost‑effective models first, escalating only as needed.
 
+## Secure Settings Storage
+
+- API keys are stored only in the Electron main process and encrypted using Electron safeStorage before persisting. See [safeStorage.encryptString()](src/main/services/SettingsService.ts:89) and [safeStorage.decryptString()](src/main/services/SettingsService.ts:75). The renderer interacts via IPC and never receives raw secrets.
+- On disk, keys are stored encrypted (base64-encoded cipher text) under userData/settings.json. The path is resolved via [app.getPath('userData')](src/main/services/SettingsService.ts:32), where the service writes to `settings.json`.
+- Manual verification:
+  1) Open the app’s user data directory returned by [app.getPath('userData')](src/main/services/SettingsService.ts:32).
+  2) Inspect the `settings.json` file and confirm `providers.*.apiKey` fields appear as base64 blobs (not plaintext).
+  3) Use the Settings UI to run connection tests and Save; the file should continue to contain encrypted values.
+- Permissions:
+  - The settings file resides in Electron’s per-user app data directory. On POSIX, typical user directory permissions restrict other users by default; on Windows, user profile ACLs apply. Additional hardening may be added if needed.
+- Migration:
+  - First launch after an update may require re-entering keys; a missing or corrupted file is handled gracefully (defaults are returned without throwing).
 ## Troubleshooting
 
 ### Common Issues

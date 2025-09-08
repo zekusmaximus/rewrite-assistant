@@ -53,7 +53,7 @@ const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) => {
         setExportError(result.error || 'Export failed');
       }
     } catch (error) {
-      // eslint-disable-next-line no-console
+       
       console.error('[ExportDialog] Export error:', error);
       setExportError('An error occurred during export');
     } finally {

@@ -43,7 +43,11 @@ export const SUPPORTED_FILE_TYPES = [
    GENERATE_REWRITE: 'rewrite:generate',
    REWRITE_PROGRESS: 'rewrite:progress',
    // Export channels
-   EXPORT_WITH_REWRITES: 'file:export_with_rewrites'
+   EXPORT_WITH_REWRITES: 'file:export_with_rewrites',
+   // Settings channels
+   SETTINGS_LOAD: 'settings:load',
+   SETTINGS_SAVE: 'settings:save',
+   SETTINGS_TEST_CONNECTION: 'settings:test_connection'
  };
 
 // Default manuscript file name

@@ -9,6 +9,7 @@ import SceneRewriter from '../services/rewrite/SceneRewriter';
 import type { AnalysisRequest, AnalysisType, ClaudeConfig, OpenAIConfig, GeminiConfig } from '../services/ai/types';
 import AnalysisCache from '../services/cache/AnalysisCache';
 import ManuscriptExporter, { ExportOptions } from '../services/export/ManuscriptExporter';
+import settingsService from './services/SettingsService';
  
 // AI service manager singleton and helpers
 /**
@@ -607,6 +608,34 @@ export function setupIPCHandlers(): void {
     try { await ensureCacheInit(); } catch {}
     try { await analysisCache.warmCache(Array.isArray(scenes) ? scenes : []); return true; } catch { return false; }
   });
-
+  
+  // Settings service handlers (no secrets logged)
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_LOAD, async () => {
+    try {
+      return await settingsService.loadSettings();
+    } catch (error: any) {
+      console.error('[Handlers] Settings load error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_SAVE, async (_event, settings) => {
+    try {
+      return await settingsService.saveSettings(settings);
+    } catch (error: any) {
+      console.error('[Handlers] Settings save error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_TEST_CONNECTION, async (_event, { provider, config }) => {
+    try {
+      return await settingsService.testConnection(provider, config);
+    } catch (error: any) {
+      console.error('[Handlers] Connection test error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
 }
  

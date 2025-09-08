@@ -94,7 +94,7 @@ beforeAll(async () => {
 
   const { BrowserWindow } = await import('electron');
   // Create one window instance in the mocked electron so handlers can find it
-  // eslint-disable-next-line no-new
+   
   new (BrowserWindow as any)();
 });
 
