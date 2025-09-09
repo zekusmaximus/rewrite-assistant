@@ -3,9 +3,19 @@ import * as path from 'path';
 import { APP_CONFIG } from '../shared/constants';
 import { setupIPCHandlers } from './handlers';
 
-// Handle creating/removing shortcuts on Windows when installing/uninstalling.
-if (require('electron-squirrel-startup')) {
-  app.quit();
+// Handle creating/removing shortcuts on Windows when installing/uninstalling (Windows only).
+if (process.platform === 'win32') {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // Optional in dev; present in production on Windows. If missing, ignore.
+    if (require('electron-squirrel-startup')) {
+      app.quit();
+      // Do not continue starting the app when handling Squirrel events.
+      // No 'return' at top-level; app.quit() is sufficient.
+    }
+  } catch {
+    // Module not found (e.g., dev or non-Windows env) — safely ignore.
+  }
 }
 
 let mainWindow: BrowserWindow;
