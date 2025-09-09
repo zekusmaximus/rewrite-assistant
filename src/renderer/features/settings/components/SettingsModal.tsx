@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import ProviderSection from './ProviderSection';
 import APIKeyForm from './APIKeyForm';
 import { useSettingsStore } from '../stores';
@@ -27,7 +28,7 @@ const StatusPill: React.FC<{ status: TestStatus }> = ({ status }) => {
   );
 };
 
-const ensureConfig = (cfg?: { enabled: boolean; apiKey: string; model?: string; baseUrl?: string }) => ({
+const ensureConfig = (cfg?: Partial<ProviderConfig>): ProviderConfig => ({
   enabled: cfg?.enabled ?? false,
   apiKey: cfg?.apiKey ?? '',
   model: cfg?.model,
@@ -118,7 +119,7 @@ const ProviderBlock: React.FC<{
       // Wait for mock to clear its 800ms reset, then set our own success/error
       const cfgLatest = ensureConfig(useSettingsStore.getState().providers[provider]);
       const [result] = await Promise.all([
-        runHookTest(provider, cfgLatest as any),
+        runHookTest(provider, cfgLatest),
         new Promise((r) => setTimeout(r, 850)),
       ]);
       useSettingsStore.setState((state) => ({
@@ -206,13 +207,34 @@ const SettingsModal: React.FC = () => {
         const cfg = ensureConfig(providers[name]);
         const errs = validationMap[name];
         if (cfg.enabled && isNonEmpty(cfg.apiKey) && !errs.apiKey && !errs.model) {
-          eligible[name] = cfg as any;
+          eligible[name] = cfg;
         }
       }
       await configureProviders(eligible);
     }, 600);
     return () => clearTimeout(timer);
   }, [providers, saveSettings, configureProviders, validationMap]);
+
+  // Lock background scroll while the modal is open
+  useEffect(() => {
+    document.body.classList.add('overflow-hidden');
+    return () => {
+      document.body.classList.remove('overflow-hidden');
+    };
+  }, []);
+
+  // Close on Escape
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closeSettings();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [closeSettings]);
 
   const handleSave = async () => {
     const success = await saveSettings();
@@ -222,7 +244,7 @@ const SettingsModal: React.FC = () => {
         const cfg = ensureConfig(providers[name]);
         const errs = validationMap[name];
         if (cfg.enabled && isNonEmpty(cfg.apiKey) && !errs.apiKey && !errs.model) {
-          eligible[name] = cfg as any;
+          eligible[name] = cfg;
         }
       }
       await configureProviders(eligible);
@@ -232,17 +254,21 @@ const SettingsModal: React.FC = () => {
     }
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      className="fixed inset-0 z-[1000] flex items-center justify-center"
       role="dialog"
       aria-modal="true"
       aria-labelledby="settings-modal-title"
     >
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px]" onClick={closeSettings} />
+
+      {/* Modal panel */}
+      <div className="relative z-[1100] bg-white dark:bg-slate-900 shadow-2xl ring-1 ring-black/5 border border-slate-200/60 dark:border-slate-700/60 rounded-xl w-[min(900px,calc(100vw-2rem))] max-h-[85vh] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-          <h2 id="settings-modal-title" className="text-lg font-semibold text-gray-900">
+          <h2 id="settings-modal-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">
             Settings
           </h2>
           <button
@@ -258,16 +284,18 @@ const SettingsModal: React.FC = () => {
 
         {/* Tabs */}
         <div className="px-4 pt-3">
-          <div className="inline-flex rounded-md shadow-sm border border-gray-200 overflow-hidden" role="tablist" aria-label="Settings tabs">
+          <div
+            className="inline-flex rounded-md shadow-sm border border-gray-200 overflow-hidden"
+            role="tablist"
+            aria-label="Settings tabs"
+          >
             <button
               type="button"
               role="tab"
               aria-selected={activeTab === 'api-keys'}
               onClick={() => setActiveTab('api-keys')}
               className={`px-4 py-2 text-sm font-medium focus:outline-none ${
-                activeTab === 'api-keys'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-50'
+                activeTab === 'api-keys' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
               }`}
             >
               API Keys
@@ -278,9 +306,7 @@ const SettingsModal: React.FC = () => {
               aria-selected={activeTab === 'general'}
               onClick={() => setActiveTab('general')}
               className={`px-4 py-2 text-sm font-medium focus:outline-none border-l border-gray-200 ${
-                activeTab === 'general'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-50'
+                activeTab === 'general' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
               }`}
             >
               General
@@ -289,7 +315,7 @@ const SettingsModal: React.FC = () => {
         </div>
 
         {/* Content */}
-        <div className="p-4 overflow-y-auto">
+        <div className="p-4 flex-1 overflow-y-auto">
           {activeTab === 'api-keys' ? (
             <div className="space-y-4">
               <ProviderBlock
@@ -315,7 +341,7 @@ const SettingsModal: React.FC = () => {
               />
             </div>
           ) : (
-            <div className="text-sm text-gray-600">
+            <div className="text-sm text-gray-600 dark:text-gray-300">
               General settings will appear here. Coming soon.
             </div>
           )}
@@ -339,7 +365,8 @@ const SettingsModal: React.FC = () => {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

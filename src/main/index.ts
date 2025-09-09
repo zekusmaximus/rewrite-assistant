@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import * as path from 'path';
 import { APP_CONFIG } from '../shared/constants';
 import { setupIPCHandlers } from './handlers';
@@ -6,7 +6,6 @@ import { setupIPCHandlers } from './handlers';
 // Handle creating/removing shortcuts on Windows when installing/uninstalling (Windows only).
 if (process.platform === 'win32') {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     // Optional in dev; present in production on Windows. If missing, ignore.
     if (require('electron-squirrel-startup')) {
       app.quit();

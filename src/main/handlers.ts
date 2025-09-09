@@ -1,4 +1,4 @@
-import { ipcMain, dialog, BrowserWindow, shell } from 'electron';
+import { ipcMain, dialog, BrowserWindow, shell, app } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { mainWindow } from './index';
@@ -48,7 +48,7 @@ function normalizeReaderKnowledge(raw: unknown): ReaderKnowledge {
   if (!raw || typeof raw !== 'object') return fallback;
   const obj = raw as Record<string, unknown>;
 
-  const known = (obj as any).knownCharacters;
+  const known = (obj as Record<string, unknown>).knownCharacters;
   let knownSet: Set<string>;
   if (known instanceof Set) {
     knownSet = known;
@@ -60,9 +60,9 @@ function normalizeReaderKnowledge(raw: unknown): ReaderKnowledge {
 
   return {
     knownCharacters: knownSet,
-    establishedTimeline: Array.isArray((obj as any).establishedTimeline) ? (obj as any).establishedTimeline : [],
-    revealedPlotPoints: Array.isArray((obj as any).revealedPlotPoints) ? (obj as any).revealedPlotPoints : [],
-    establishedSettings: Array.isArray((obj as any).establishedSettings) ? (obj as any).establishedSettings : [],
+    establishedTimeline: Array.isArray((obj as Record<string, unknown>).establishedTimeline) ? ((obj as Record<string, unknown>).establishedTimeline as ReaderKnowledge['establishedTimeline']) : ([] as ReaderKnowledge['establishedTimeline']),
+    revealedPlotPoints: Array.isArray((obj as Record<string, unknown>).revealedPlotPoints) ? ((obj as Record<string, unknown>).revealedPlotPoints as string[]) : [],
+    establishedSettings: Array.isArray((obj as Record<string, unknown>).establishedSettings) ? ((obj as Record<string, unknown>).establishedSettings as ReaderKnowledge['establishedSettings']) : ([] as ReaderKnowledge['establishedSettings']),
   };
 }
 
@@ -247,24 +247,40 @@ export function setupIPCHandlers(): void {
   // Handle auto-loading manuscript.txt from the project root
   ipcMain.handle(IPC_CHANNELS.AUTO_LOAD_MANUSCRIPT, async () => {
     try {
-      // Get the directory where the app is running from
-      const appPath = process.cwd();
-      const manuscriptPath = path.join(appPath, DEFAULT_MANUSCRIPT_FILE);
-      
-      console.log('Auto-load: Checking for manuscript at:', manuscriptPath);
-      
-      // Check if manuscript.txt exists
-      if (!await fs.access(manuscriptPath).then(() => true).catch(() => false)) {
+      // Resolve manuscript path via robust candidate order (dev and packaged):
+      // 1) CWD + default (current behavior)
+      // 2) two dirs up from __dirname (dev build output -> repo root)
+      // 3) app path (packaged: resources/app)
+      // 4) executable directory (packaged: next to binary)
+      const rawCandidates = [
+        path.join(process.cwd(), DEFAULT_MANUSCRIPT_FILE),
+        path.join(__dirname, '..', '..', DEFAULT_MANUSCRIPT_FILE),
+        (app?.getAppPath ? path.join(app.getAppPath(), DEFAULT_MANUSCRIPT_FILE) : ''),
+        path.join(path.dirname(process.execPath), DEFAULT_MANUSCRIPT_FILE),
+      ];
+      const candidates = rawCandidates.filter(Boolean) as string[];
+
+      let manuscriptPath: string | null = null;
+      for (const candidate of candidates) {
+        const exists = await fs.access(candidate).then(() => true).catch(() => false);
+        if (exists) { manuscriptPath = candidate; break; }
+      }
+
+      // If none of the candidates exist, behave as before
+      if (!manuscriptPath) {
         console.log('Auto-load: manuscript.txt not found');
         return null; // File doesn't exist, that's OK
       }
-      
+
+      console.log('Auto-load: Checking for manuscript at:', manuscriptPath);
+
+      // Proceed with the existing read/parse logic
       console.log('Auto-load: Found manuscript.txt, parsing...');
       const content = await fs.readFile(manuscriptPath, 'utf-8');
       const manuscript = parseManuscriptIntoScenes(content, manuscriptPath);
-      
+
       console.log('Auto-load: Successfully parsed manuscript with', manuscript.scenes.length, 'scenes');
-      
+
       return manuscript;
     } catch (error) {
       console.error('Error auto-loading manuscript:', error);
@@ -300,9 +316,9 @@ export function setupIPCHandlers(): void {
     }
   });
   // Export manuscript with rewrites
-  ipcMain.handle(IPC_CHANNELS.EXPORT_WITH_REWRITES, async (event: any, payload: any) => {
+  ipcMain.handle(IPC_CHANNELS.EXPORT_WITH_REWRITES, async (event: unknown, payload: unknown) => {
     try {
-      const { manuscript, rewrites, options } = payload || {};
+      const { manuscript, rewrites, options } = (payload as Record<string, unknown>) || {};
       
       if (!manuscript) {
         return toErrorResponse('No manuscript to export', 'EXPORT_ERROR');
@@ -325,7 +341,7 @@ export function setupIPCHandlers(): void {
       // Show save dialog
       const saveResult = await dialog.showSaveDialog(mainWindow, {
         title: 'Export Manuscript',
-        defaultPath: options?.filename || `${manuscript.title || 'manuscript'}_export.txt`,
+        defaultPath: (options && typeof options === 'object' && !Array.isArray(options) && typeof (options as Record<string, unknown>).filename === 'string' ? ((options as Record<string, unknown>).filename as string) : `${((manuscript && typeof manuscript === 'object' && typeof (manuscript as Record<string, unknown>).title === 'string') ? ((manuscript as Record<string, unknown>).title as string) : 'manuscript')}_export.txt`),
         filters: [
           { name: 'Text Files', extensions: ['txt'] },
           { name: 'Markdown Files', extensions: ['md'] },
@@ -339,22 +355,23 @@ export function setupIPCHandlers(): void {
       }
       
       // Update options with selected path
-      const exportOptions: ExportOptions = {
-        ...(options || {}),
+      const exportOptions = ({
+        ...((options && typeof options === 'object') ? (options as object) : {}),
         outputPath: path.dirname(saveResult.filePath),
         filename: path.basename(saveResult.filePath)
-      };
+      }) as unknown as ExportOptions;
       
       // Perform export
       const result = await manuscriptExporter.exportManuscript(
-        manuscript,
+        manuscript as Manuscript,
         rewriteMap,
         exportOptions
       );
       
       // Open file location if successful
-      if ((result as any).success && result.filePath) {
-        try { shell.showItemInFolder(result.filePath); } catch {}
+      const r = result as unknown as { success?: boolean; filePath?: string };
+      if (r && r.success && typeof r.filePath === 'string') {
+        try { shell.showItemInFolder(r.filePath); } catch (e) { void e; }
       }
       
       return result;
@@ -366,14 +383,14 @@ export function setupIPCHandlers(): void {
   });
 
   // AI: Configure providers (Anthropic/OpenAI/Gemini)
-  ipcMain.handle(IPC_CHANNELS.CONFIGURE_AI_PROVIDER, async (event: any, payload: any) => {
+  ipcMain.handle(IPC_CHANNELS.CONFIGURE_AI_PROVIDER, async (event: unknown, payload: unknown) => {
     try {
       const cfg: { claude?: ClaudeConfig; openai?: OpenAIConfig; gemini?: GeminiConfig } = {};
       if (payload && typeof payload === 'object') {
-        const p = payload as Record<string, any>;
+        const p = (payload as Record<string, unknown>);
 
         if (p.claude !== undefined) {
-          if (p.claude && typeof p.claude.apiKey === 'string' && p.claude.apiKey.trim().length > 0) {
+          if (p.claude && typeof p.claude === 'object' && !Array.isArray(p.claude) && typeof (p.claude as Record<string, unknown>).apiKey === 'string' && ((p.claude as Record<string, unknown>).apiKey as string).trim().length > 0) {
             cfg.claude = p.claude as ClaudeConfig;
           } else {
             console.warn('[IPC][CONFIGURE_AI_PROVIDER] Invalid claude.apiKey');
@@ -382,7 +399,7 @@ export function setupIPCHandlers(): void {
         }
 
         if (p.openai !== undefined) {
-          if (p.openai && typeof p.openai.apiKey === 'string' && p.openai.apiKey.trim().length > 0) {
+          if (p.openai && typeof p.openai === 'object' && !Array.isArray(p.openai) && typeof (p.openai as Record<string, unknown>).apiKey === 'string' && ((p.openai as Record<string, unknown>).apiKey as string).trim().length > 0) {
             cfg.openai = p.openai as OpenAIConfig;
           } else {
             console.warn('[IPC][CONFIGURE_AI_PROVIDER] Invalid openai.apiKey');
@@ -391,7 +408,7 @@ export function setupIPCHandlers(): void {
         }
 
         if (p.gemini !== undefined) {
-          if (p.gemini && typeof p.gemini.apiKey === 'string' && p.gemini.apiKey.trim().length > 0) {
+          if (p.gemini && typeof p.gemini === 'object' && !Array.isArray(p.gemini) && typeof (p.gemini as Record<string, unknown>).apiKey === 'string' && ((p.gemini as Record<string, unknown>).apiKey as string).trim().length > 0) {
             cfg.gemini = p.gemini as GeminiConfig;
           } else {
             console.warn('[IPC][CONFIGURE_AI_PROVIDER] Invalid gemini.apiKey');
@@ -410,27 +427,26 @@ export function setupIPCHandlers(): void {
   });
 
   // AI: Test provider configuration (lightweight, no network)
-  ipcMain.handle('test-ai-provider', async (_event, payload: any) => {
+  ipcMain.handle('test-ai-provider', async (_event, payload: unknown) => {
     try {
       const invalid = () => ({ ok: false as const, error: { message: 'Invalid configuration', code: 'INVALID_CONFIG' } });
 
       if (!payload || typeof payload !== 'object') return invalid();
-      const { provider, config } = payload as { provider?: string; config?: any };
+      const { provider, config } = payload as { provider?: string; config?: unknown };
 
       const allowed = new Set(['claude', 'openai', 'gemini']);
       if (typeof provider !== 'string' || !allowed.has(provider)) return invalid();
 
       if (!config || typeof config !== 'object') return invalid();
-      const apiKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : '';
+      const cfgObj = config as Record<string, unknown>;
+      const apiKey = typeof cfgObj.apiKey === 'string' ? cfgObj.apiKey.trim() : '';
       if (!apiKey || apiKey.length < 20) return invalid();
-
-      if (config.model !== undefined) {
-        if (typeof config.model !== 'string' || !config.model.trim()) return invalid();
+      if (cfgObj.model !== undefined) {
+        if (typeof cfgObj.model !== 'string' || !cfgObj.model.trim()) return invalid();
       }
-
-      if (config.baseUrl !== undefined) {
-        if (typeof config.baseUrl !== 'string') return invalid();
-        const base = config.baseUrl.trim();
+      if (cfgObj.baseUrl !== undefined) {
+        if (typeof cfgObj.baseUrl !== 'string') return invalid();
+        const base = cfgObj.baseUrl.trim();
         if (base && !/^https?:\/\//i.test(base)) return invalid();
       }
 
@@ -446,18 +462,18 @@ export function setupIPCHandlers(): void {
   });
 
   // AI: Analyze continuity
-  ipcMain.handle(IPC_CHANNELS.ANALYZE_CONTINUITY, async (event: any, payload: any) => {
+  ipcMain.handle(IPC_CHANNELS.ANALYZE_CONTINUITY, async (event: unknown, payload: unknown) => {
     try {
       if (!payload || typeof payload !== 'object') {
         return toErrorResponse('Invalid payload', 'ANALYZE_FAILED');
       }
-      const p = payload as Record<string, any>;
-      const scene = p.scene;
+      const p = payload as Record<string, unknown>;
+      const scene = p.scene as unknown;
       const previousScenes = Array.isArray(p.previousScenes) ? (p.previousScenes as Scene[]) : [];
       const analysisType = p.analysisType as AnalysisType;
       const allowed: AnalysisType[] = ['simple', 'consistency', 'complex', 'full'];
 
-      if (!scene || typeof scene.text !== 'string') {
+      if (!scene || typeof (scene as Record<string, unknown>).text !== 'string') {
         console.warn('[IPC][ANALYZE_CONTINUITY] Invalid scene payload');
         return toErrorResponse('Invalid scene', 'ANALYZE_FAILED');
       }
@@ -467,7 +483,7 @@ export function setupIPCHandlers(): void {
       }
 
       const readerContext = normalizeReaderKnowledge(p.readerContext);
-      const req: AnalysisRequest = { scene, previousScenes, analysisType, readerContext };
+      const req: AnalysisRequest = { scene: scene as Scene, previousScenes, analysisType, readerContext };
 
       const res = await aiManager.analyzeContinuity(req);
       return res;
@@ -479,17 +495,17 @@ export function setupIPCHandlers(): void {
   });
 
   // AI: Generate single-scene rewrite
-  ipcMain.handle(IPC_CHANNELS.GENERATE_REWRITE, async (event: any, payload: any) => {
+  ipcMain.handle(IPC_CHANNELS.GENERATE_REWRITE, async (event: unknown, payload: unknown) => {
     try {
-      console.log('[Handlers] Generate rewrite request for scene:', payload?.sceneId);
+      console.log('[Handlers] Generate rewrite request for scene:', (payload && typeof payload === 'object' ? (payload as Record<string, unknown>).sceneId : undefined));
 
       // Validate payload
-      if (!payload?.scene || !payload?.issues || !Array.isArray(payload.issues) || payload.issues.length === 0) {
+      if (!(payload && typeof payload === 'object' && !Array.isArray(payload) && (payload as Record<string, unknown>).scene) || !(payload && typeof payload === 'object' && !Array.isArray(payload) && (payload as Record<string, unknown>).issues) || !Array.isArray(((payload as Record<string, unknown>).issues as unknown[])) || (((payload as Record<string, unknown>).issues as unknown[]).length === 0)) {
         return toErrorResponse('Invalid request: missing scene or issues', 'REWRITE_GENERATION_ERROR');
       }
 
       // Build reader context from provided or defaults
-      const readerContext = normalizeReaderKnowledge(payload.readerContext || {
+      const readerContext = normalizeReaderKnowledge(((payload && typeof payload === 'object') ? (payload as Record<string, unknown>).readerContext : undefined) || {
         knownCharacters: new Set(),
         establishedTimeline: [],
         revealedPlotPoints: [],
@@ -497,80 +513,80 @@ export function setupIPCHandlers(): void {
       });
 
       // Previous scenes for context (limit to last 3)
-      const previousScenes = Array.isArray(payload.previousScenes) ? (payload.previousScenes as Scene[]).slice(-3) : [];
+      const previousScenes = (payload && typeof payload === 'object' && Array.isArray((payload as Record<string, unknown>).previousScenes)) ? (((payload as Record<string, unknown>).previousScenes as Scene[]).slice(-3)) : [];
 
       // Create rewrite request
       const request = {
-        scene: payload.scene as Scene,
-        issuesFound: payload.issues,
+        scene: (payload && typeof payload === 'object' ? (payload as Record<string, unknown>).scene as Scene : (undefined as unknown as Scene)),
+        issuesFound: (payload && typeof payload === 'object' ? (payload as Record<string, unknown>).issues : undefined),
         readerContext,
         previousScenes,
-        preserveElements: Array.isArray(payload.preserveElements) ? payload.preserveElements : [],
+        preserveElements: (payload && typeof payload === 'object' && Array.isArray((payload as Record<string, unknown>).preserveElements)) ? ((payload as Record<string, unknown>).preserveElements as unknown[]) : [],
       };
 
       // Generate rewrite (instantiate per-call to cooperate with test mocks)
       // Extremely defensive unwrapping to handle ESM/CJS and Vitest mock shapes.
-      const unwrapCtor = (mod: any): any => {
-        let c = mod;
-        for (let i = 0; i < 4; i++) {
-          if (c && typeof c === 'object' && 'default' in c) {
-            c = c.default;
-          } else {
-            break;
-          }
-        }
-        return c;
-      };
+      const unwrapCtor = (mod: unknown): unknown => {
+       let c: unknown = mod;
+       for (let i = 0; i < 4; i++) {
+         if (c && typeof c === 'object' && !Array.isArray(c) && 'default' in c) {
+           c = (c as Record<string, unknown>).default as unknown;
+         } else {
+           break;
+         }
+       }
+       return c;
+     };
 
-      let localRewriter: any = null;
-      const C0: any = unwrapCtor(SceneRewriter as any);
+      let localRewriter: unknown = null;
+      const C0: unknown = unwrapCtor(SceneRewriter as unknown);
 
       // Try as class with dependency
-      try { localRewriter = new C0(aiManager); } catch {}
+      try { localRewriter = new (C0 as { new (...args: unknown[]): unknown })(aiManager); } catch (e) { void e; }
 
       // Try as factory with dependency
-      if (!localRewriter || typeof localRewriter.rewriteScene !== 'function') {
-        try { localRewriter = C0(aiManager); } catch {}
+      if (!localRewriter || typeof (localRewriter as Record<string, unknown>).rewriteScene !== 'function') {
+        try { localRewriter = (C0 as (...args: unknown[]) => unknown)(aiManager); } catch (e) { void e; }
       }
 
       // Try no-arg variants (some mocks ignore ctor args)
-      if (!localRewriter || typeof localRewriter.rewriteScene !== 'function') {
-        try { localRewriter = new C0(); } catch {}
+      if (!localRewriter || typeof (localRewriter as Record<string, unknown>).rewriteScene !== 'function') {
+        try { localRewriter = new (C0 as { new (...args: unknown[]): unknown })(); } catch (e) { void e; }
       }
-      if (!localRewriter || typeof localRewriter.rewriteScene !== 'function') {
-        try { localRewriter = C0(); } catch {}
+      if (!localRewriter || typeof (localRewriter as Record<string, unknown>).rewriteScene !== 'function') {
+        try { localRewriter = (C0 as (...args: unknown[]) => unknown)(); } catch (e) { void e; }
       }
 
       // Final sanity: if still not available, attempt one more unwrap level
-      if (!localRewriter || typeof localRewriter.rewriteScene !== 'function') {
-        const C1: any = unwrapCtor(C0);
-        try { localRewriter = new C1(aiManager); } catch {}
-        if (!localRewriter || typeof localRewriter.rewriteScene !== 'function') {
-          try { localRewriter = C1(aiManager); } catch {}
+      if (!localRewriter || typeof (localRewriter as Record<string, unknown>).rewriteScene !== 'function') {
+        const C1: unknown = unwrapCtor(C0);
+        try { localRewriter = new (C1 as { new (...args: unknown[]): unknown })(aiManager); } catch (e) { void e; }
+        if (!localRewriter || typeof (localRewriter as Record<string, unknown>).rewriteScene !== 'function') {
+          try { localRewriter = (C1 as (...args: unknown[]) => unknown)(aiManager); } catch (e) { void e; }
         }
-        if (!localRewriter || typeof localRewriter.rewriteScene !== 'function') {
-          try { localRewriter = new C1(); } catch {}
+        if (!localRewriter || typeof (localRewriter as Record<string, unknown>).rewriteScene !== 'function') {
+          try { localRewriter = new (C1 as { new (...args: unknown[]): unknown })(); } catch (e) { void e; }
         }
-        if (!localRewriter || typeof localRewriter.rewriteScene !== 'function') {
-          try { localRewriter = C1(); } catch {}
+        if (!localRewriter || typeof (localRewriter as Record<string, unknown>).rewriteScene !== 'function') {
+          try { localRewriter = (C1 as (...args: unknown[]) => unknown)(); } catch (e) { void e; }
         }
       }
 
       // At this point, tests that mock SceneRewriter should have provided rewriteScene
       // If not, return a structured error without throwing to avoid failing IPC handler entirely
-      if (!localRewriter || typeof localRewriter.rewriteScene !== 'function') {
+      if (!localRewriter || typeof (localRewriter as Record<string, unknown>).rewriteScene !== 'function') {
         console.error('[Handlers] SceneRewriter mock/impl did not expose rewriteScene');
         return toErrorResponse('Rewrite engine unavailable', 'REWRITE_GENERATION_ERROR');
       }
 
-      const result = await localRewriter.rewriteScene(request);
+      const result = await (localRewriter as { rewriteScene: (req: unknown) => Promise<unknown> | unknown }).rewriteScene(request);
 
       // Send progress update (if a main window pattern exists)
       const win = typeof mainWindow !== 'undefined' && mainWindow ? mainWindow : (BrowserWindow.getAllWindows?.()[0] || undefined);
       if (win && !win.isDestroyed?.()) {
-        const status = result && (result as any).success ? 'complete' : 'failed';
+        const status = (result && typeof result === 'object' && !Array.isArray(result) && Boolean((result as Record<string, unknown>).success)) ? 'complete' : 'failed';
         win.webContents.send(IPC_CHANNELS.REWRITE_PROGRESS, {
-          sceneId: payload.sceneId || payload.scene?.id,
+          sceneId: ((payload && typeof payload === 'object' && typeof (payload as Record<string, unknown>).sceneId === 'string') ? ((payload as Record<string, unknown>).sceneId as string) : ((payload && typeof payload === 'object' && (payload as Record<string, unknown>).scene && typeof ((payload as Record<string, unknown>).scene as Record<string, unknown>).id === 'string') ? (((payload as Record<string, unknown>).scene as Record<string, unknown>).id as string) : undefined)),
           status,
         });
       }
@@ -595,17 +611,17 @@ export function setupIPCHandlers(): void {
 
   // Cache management: stats, clear, warm
   ipcMain.handle(IPC_CHANNELS.GET_CACHE_STATS, async () => {
-    try { await ensureCacheInit(); } catch {}
+    try { await ensureCacheInit(); } catch (e) { void e; }
     try { return analysisCache.getStats(); } catch { return { hitRate: 0, size: 0, totalHits: 0, totalMisses: 0, avgHitTime: 0, avgGenerationTime: 0 }; }
   });
 
   ipcMain.handle(IPC_CHANNELS.CLEAR_ANALYSIS_CACHE, async () => {
-    try { await ensureCacheInit(); } catch {}
+    try { await ensureCacheInit(); } catch (e) { void e; }
     try { await analysisCache.clear(); return true; } catch { return false; }
   });
 
   ipcMain.handle(IPC_CHANNELS.WARM_CACHE, async (_event, scenes: Scene[] = []) => {
-    try { await ensureCacheInit(); } catch {}
+    try { await ensureCacheInit(); } catch (e) { void e; }
     try { await analysisCache.warmCache(Array.isArray(scenes) ? scenes : []); return true; } catch { return false; }
   });
   
@@ -613,27 +629,27 @@ export function setupIPCHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.SETTINGS_LOAD, async () => {
     try {
       return await settingsService.loadSettings();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('[Handlers] Settings load error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   });
   
   ipcMain.handle(IPC_CHANNELS.SETTINGS_SAVE, async (_event, settings) => {
     try {
       return await settingsService.saveSettings(settings);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('[Handlers] Settings save error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   });
   
   ipcMain.handle(IPC_CHANNELS.SETTINGS_TEST_CONNECTION, async (_event, { provider, config }) => {
     try {
       return await settingsService.testConnection(provider, config);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('[Handlers] Connection test error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   });
   

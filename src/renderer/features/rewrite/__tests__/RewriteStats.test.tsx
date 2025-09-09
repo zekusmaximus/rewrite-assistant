@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import '@testing-library/jest-dom';
 import { render, screen } from '@testing-library/react';
 import RewriteStats from '../components/RewriteStats';
@@ -49,6 +49,7 @@ beforeEach(() => {
     selectedSceneId: null,
     isLoading: false,
     error: null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
 
   // Seed rewrite store with one rewrite for s2
@@ -67,6 +68,7 @@ beforeEach(() => {
   useRewriteStore.setState({
     sceneRewrites: new Map<string, RewriteVersion[]>([['s2', [rv]]]),
     batchProgress: undefined
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
 });
 

@@ -21,8 +21,8 @@ const dynamicRequire: NodeRequire | null = (() => {
   }
 })();
 
-// Attempt to load compromise dynamically. Fall back to light regex-based extraction if not present.
-let nlp: any = null;
+ // Attempt to load compromise dynamically. Fall back to light regex-based extraction if not present.
+let nlp: unknown = null;
 try {
   if (dynamicRequire) {
     nlp = dynamicRequire('compromise');
@@ -31,29 +31,37 @@ try {
   nlp = null;
 }
 
+type NlpFn = (t: string) => {
+  people?: () => { out: (m: string) => string[] };
+  nouns?: () => { out: (m: string) => string[] };
+  topics?: () => { out: (m: string) => string[] };
+  verbs?: () => { out: (m: string) => string[] };
+  dates?: () => { out: (m: string) => string[] };
+  times?: () => { out: (m: string) => string[] };
+};
+
 // Utility: stable JSON stringify (sorted object keys for deterministic hashing)
-function stableStringify(value: any): string {
-  const seen = new WeakSet();
-  const sorter = (key: string, val: any) => {
+function stableStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+  const sorter = (_key: string, val: unknown) => {
     if (val && typeof val === 'object') {
-      if (seen.has(val)) return undefined;
-      seen.add(val);
+      if (seen.has(val as object)) return undefined;
+      seen.add(val as object);
       if (Array.isArray(val)) {
-        return val.map((v) => (typeof v === 'object' ? JSON.parse(stableStringify(v)) : v));
+        return (val as unknown[]).map((v) => (typeof v === 'object' ? JSON.parse(stableStringify(v)) : v));
       }
-      const sorted: Record<string, any> = {};
-      Object.keys(val)
-        .sort()
-        .forEach((k) => {
-          // Skip undefined for stability
-          const v = (val as any)[k];
-          if (v !== undefined) sorted[k] = v;
-        });
+      const rec = val as Record<string, unknown>;
+      const keys = Object.keys(rec).sort();
+      const sorted: Record<string, unknown> = {};
+      for (const k of keys) {
+        const v = rec[k];
+        if (v !== undefined) sorted[k] = v;
+      }
       return sorted;
     }
-    return val;
+    return val as unknown;
   };
-  return JSON.stringify(value, sorter);
+  return JSON.stringify(value, sorter as (key: string, value: unknown) => unknown);
 }
 
 // Utility: sha256 hex digest
@@ -79,7 +87,9 @@ function normalizePunctuation(text: string): string {
 // Remove Markdown/formatting markers that are non-semantic in this context
 function stripFormatting(text: string): string {
   if (!text) return '';
-  return text.replace(/[*_`~#>\[\](){}|\\]/g, ' ');
+  return text
+    .replace(/[*_`~#>(){}|\\]/g, ' ')
+    .replace(/[[\]]/g, ' ');
 }
 
 // Collapse repeated whitespace and punctuation while preserving word order
@@ -136,9 +146,10 @@ const FALLBACK = {
 
 function extractPeopleWithCompromise(text: string): string[] {
   try {
-    if (!nlp) return FALLBACK.extractPeople(text);
-    const doc = nlp(text);
-    const people = doc.people().out('array') as string[];
+    const n = nlp as NlpFn | null;
+    if (!n) return FALLBACK.extractPeople(text);
+    const doc = n(text);
+    const people = doc.people!().out('array') as string[];
     return Array.from(new Set(people));
   } catch {
     return FALLBACK.extractPeople(text);
@@ -147,9 +158,10 @@ function extractPeopleWithCompromise(text: string): string[] {
 
 function extractNounsWithCompromise(text: string): string[] {
   try {
-    if (!nlp) return FALLBACK.extractNouns(text);
-    const doc = nlp(text);
-    const nouns = doc.nouns().out('array') as string[];
+    const n = nlp as NlpFn | null;
+    if (!n) return FALLBACK.extractNouns(text);
+    const doc = n(text);
+    const nouns = doc.nouns!().out('array') as string[];
     const topics = (doc.topics ? doc.topics().out('array') : []) as string[];
     const all = [...nouns, ...topics].map((s) => s.toLowerCase());
     return Array.from(new Set(all));
@@ -160,9 +172,10 @@ function extractNounsWithCompromise(text: string): string[] {
 
 function extractVerbsWithCompromise(text: string): string[] {
   try {
-    if (!nlp) return FALLBACK.extractVerbs(text);
-    const doc = nlp(text);
-    const verbs = doc.verbs().out('array') as string[];
+    const n = nlp as NlpFn | null;
+    if (!n) return FALLBACK.extractVerbs(text);
+    const doc = n(text);
+    const verbs = doc.verbs!().out('array') as string[];
     return Array.from(new Set(verbs.map((v) => v.toLowerCase())));
   } catch {
     return FALLBACK.extractVerbs(text);
@@ -173,8 +186,9 @@ function extractTimelineMarkers(text: string): string[] {
   const found: Set<string> = new Set();
   // compromise dates/times
   try {
-    if (nlp) {
-      const doc = nlp(text);
+    const n = nlp as NlpFn | null;
+    if (n) {
+      const doc = n(text);
       if (doc.dates) {
         const dates = doc.dates().out('array') as string[];
         for (const d of dates) found.add(d.toLowerCase());
@@ -288,9 +302,10 @@ export default class SemanticHasher {
     } catch {
       // Fallback to hashing a stable JSON of the raw object (convert Set to Array if present)
       try {
-        const raw: any = { ...readerContext };
-        if (raw.knownCharacters && raw.knownCharacters instanceof Set) {
-          raw.knownCharacters = Array.from(raw.knownCharacters).sort();
+        const raw: Record<string, unknown> = { ...readerContext };
+        const kc = raw['knownCharacters'];
+        if (kc instanceof Set) {
+          raw['knownCharacters'] = Array.from(kc as Set<string>).sort();
         }
         return sha256Hex(stableStringify(raw));
       } catch {

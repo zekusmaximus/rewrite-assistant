@@ -19,28 +19,37 @@ import CacheStorage from './CacheStorage';
 // TTL duplicated here to avoid circular import
 const TTL_MS = 24 * 60 * 60 * 1000;
 
+type StorageInt = {
+ deleteBySceneId?: (id: string) => void;
+ deleteByPosition?: (pos: number) => void;
+ _getFromMemory?: (k: string) => unknown;
+ l1?: { keys?: () => IterableIterator<string>; has?: (k: string) => boolean };
+ l2Db?: { prepare: (sql: string) => unknown };
+ cleanupExpired?: () => Promise<void> | void;
+};
+
 // Stable stringify with key sorting to ensure deterministic hashing
-function stableStringify(value: any): string {
-  const seen = new WeakSet();
-  const sorter = (_key: string, val: any) => {
-    if (val && typeof val === 'object') {
-      if (seen.has(val)) return undefined;
-      seen.add(val);
-      if (Array.isArray(val)) {
-        return val.map((v) => (typeof v === 'object' ? JSON.parse(stableStringify(v)) : v));
-      }
-      const sorted: Record<string, any> = {};
-      Object.keys(val)
-        .sort()
-        .forEach((k) => {
-          const v = (val as any)[k];
-          if (v !== undefined) sorted[k] = v;
-        });
-      return sorted;
-    }
-    return val;
-  };
-  return JSON.stringify(value, sorter);
+function stableStringify(value: unknown): string {
+ const seen = new WeakSet<object>();
+ const sorter = (_key: string, val: unknown) => {
+   if (val && typeof val === 'object') {
+     if (seen.has(val as object)) return undefined;
+     seen.add(val as object);
+     if (Array.isArray(val)) {
+       return (val as unknown[]).map((v) => (typeof v === 'object' ? JSON.parse(stableStringify(v)) : v));
+     }
+     const rec = val as Record<string, unknown>;
+     const keys = Object.keys(rec).sort();
+     const sorted: Record<string, unknown> = {};
+     for (const k of keys) {
+       const v = rec[k];
+       if (v !== undefined) sorted[k] = v;
+     }
+     return sorted;
+   }
+   return val as unknown;
+ };
+ return JSON.stringify(value, sorter as (key: string, value: unknown) => unknown);
 }
 
 function sha256Hex(input: string): string {
@@ -153,8 +162,9 @@ export default class AnalysisCache {
 
   async invalidateScene(sceneId: string): Promise<void> {
     try {
+      const S = this.storage as unknown as StorageInt;
       // Leverage storage's targeted invalidation (handles L1 via metadata and L2 via index)
-      (this.storage as any).deleteBySceneId?.(sceneId);
+      S.deleteBySceneId?.(sceneId);
     } catch {
       // swallow
     }
@@ -164,7 +174,8 @@ export default class AnalysisCache {
 
   async invalidatePosition(position: number): Promise<void> {
     try {
-      (this.storage as any).deleteByPosition?.(position);
+      const S = this.storage as unknown as StorageInt;
+      S.deleteByPosition?.(position);
     } catch {
       // swallow
     }
@@ -213,14 +224,14 @@ export default class AnalysisCache {
 
     // L1 sweep (best-effort; relies on internal structures being present)
     try {
-      const l1 = (this.storage as any).l1;
-      const keysFn: (() => IterableIterator<string>) | undefined = l1?.keys?.bind(l1);
-      if (keysFn) {
-        const keys = Array.from(keysFn());
+      const S = this.storage as unknown as StorageInt;
+      const l1 = S.l1;
+      if (l1?.keys) {
+        const keys = Array.from(l1.keys());
         for (const k of keys) {
           // Trigger TTL check path; _getFromMemory deletes expired entries
-          const beforeHas = l1.has(k);
-          const v = (this.storage as any)._getFromMemory?.(k);
+          const beforeHas = l1.has ? l1.has(k) : false;
+          const v = S._getFromMemory?.(k);
           if (beforeHas && !v) removed++;
         }
       }
@@ -230,16 +241,31 @@ export default class AnalysisCache {
 
     // L2 cleanup (precise)
     try {
-      const db = (this.storage as any).l2Db;
+      const S = this.storage as unknown as StorageInt;
+      const db = S.l2Db;
       if (db) {
         const cutoff = Date.now() - TTL_MS;
-        const row = db.prepare('SELECT COUNT(*) as cnt FROM analysis_cache WHERE cached_at < ?').get(cutoff);
-        const stale = typeof row?.cnt === 'number' ? row.cnt : 0;
-        db.prepare('DELETE FROM analysis_cache WHERE cached_at < ?').run(cutoff);
+        const stmtSel = db.prepare('SELECT COUNT(*) as cnt FROM analysis_cache WHERE cached_at < ?') as unknown;
+        let row: unknown = undefined;
+        if (stmtSel && typeof stmtSel === 'object') {
+          const sel = stmtSel as { get?: (...args: unknown[]) => unknown };
+          row = sel.get?.(cutoff);
+        }
+        let stale = 0;
+        if (row && typeof row === 'object') {
+          const rec = row as Record<string, unknown>;
+          const cnt = rec['cnt'];
+          stale = typeof cnt === 'number' ? cnt : 0;
+        }
+        const stmtDel = db.prepare('DELETE FROM analysis_cache WHERE cached_at < ?') as unknown;
+        if (stmtDel && typeof stmtDel === 'object') {
+          const del = stmtDel as { run?: (...args: unknown[]) => unknown };
+          del.run?.(cutoff);
+        }
         removed += stale;
       } else {
         // If no DB, still allow storage to run its internal cleanup if available
-        await (this.storage as any).cleanupExpired?.();
+        await S.cleanupExpired?.();
       }
     } catch {
       // ignore
