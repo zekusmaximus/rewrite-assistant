@@ -223,6 +223,14 @@ const SettingsModal: React.FC = () => {
     };
   }, []);
 
+  // Debug mount/unmount
+  useEffect(() => {
+    console.debug('[SettingsModal] mounted');
+    return () => {
+      console.debug('[SettingsModal] unmounted');
+    };
+  }, []);
+
   // Close on Escape
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -262,7 +270,14 @@ const SettingsModal: React.FC = () => {
       aria-labelledby="settings-modal-title"
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px]" onClick={closeSettings} />
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-[1px]"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            closeSettings();
+          }
+        }}
+      />
 
       {/* Modal panel */}
       <div className="relative z-[1100] bg-white dark:bg-slate-900 shadow-2xl ring-1 ring-black/5 border border-slate-200/60 dark:border-slate-700/60 rounded-xl w-[min(900px,calc(100vw-2rem))] max-h-[85vh] flex flex-col overflow-hidden">
