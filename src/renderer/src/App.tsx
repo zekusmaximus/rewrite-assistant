@@ -33,19 +33,23 @@ const App: React.FC = () => {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const sceneViewerRef = useRef<SceneViewerHandle | null>(null);
   const { analyzeMovedScenes } = useAnalysis();
-  const { isSettingsOpen, openSettings } = useSettingsStore();
+  const { openSettings } = useSettingsStore();
+  const didAutoLoadRef = useRef(false);
 
-  // Auto-load manuscript.txt on startup
+  // Auto-load manuscript.txt on startup (once per mount; deps included for lint correctness)
   useEffect(() => {
+    if (didAutoLoadRef.current) return;
+    didAutoLoadRef.current = true;
+
     const autoLoadManuscript = async () => {
       try {
         console.log('Starting auto-load process...');
         setLoading(true);
         setError(null);
-        
+
         // Try to auto-load manuscript.txt from the project root
         const loadedManuscript = await window.electronAPI?.autoLoadManuscript();
-        
+
         if (loadedManuscript) {
           setManuscript(loadedManuscript);
           console.log('Auto-loaded manuscript.txt successfully with', loadedManuscript.scenes.length, 'scenes');
@@ -63,9 +67,9 @@ const App: React.FC = () => {
 
     // Only auto-load if no manuscript is currently loaded
     if (!manuscript) {
-      autoLoadManuscript();
+      void autoLoadManuscript();
     }
-  }, []); // Only run on mount
+  }, [manuscript, setLoading, setError, setManuscript]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -234,7 +238,10 @@ const App: React.FC = () => {
                   Rewrite Panel
                 </button>
                 <button
-                  onClick={openSettings}
+                  onClick={() => {
+                    console.log('[App] Settings clicked');
+                    openSettings();
+                  }}
                   className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   ⚙️ Settings
@@ -321,7 +328,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {isSettingsOpen && <SettingsModal />}
+      <SettingsModal />
       {exportDialogOpen && (
         <ExportDialog
           isOpen={exportDialogOpen}

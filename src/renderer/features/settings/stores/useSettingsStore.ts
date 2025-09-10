@@ -12,7 +12,7 @@ export interface SettingsState {
   providers: ProvidersConfigMap;
 
   // Optional general settings bag (persisted via IPC when present)
-  general?: Record<string, any>;
+  general?: Record<string, unknown>;
 
   // UI state
   isSettingsOpen: boolean;
@@ -60,8 +60,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   testResults: { ...DEFAULT_TEST_RESULTS },
 
   // Actions
-  openSettings: () => set({ isSettingsOpen: true }),
+  openSettings: () => {
+    console.log('[SettingsStore] openSettings');
+    set({ isSettingsOpen: true });
+  },
   closeSettings: () => {
+    console.log('[SettingsStore] closeSettings');
     // Phase 1: Close modal only. Data remains in-memory.
     // TODO(Phase 4): Consider clearing transient state and implementing a focus trap and escape-to-close handling.
     set({ isSettingsOpen: false });
@@ -116,7 +120,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         general: state.general ?? {} // retain or add general settings if present
       });
       return result.success;
-    } catch (error) {
+    } catch {
       console.error('Failed to save settings');
       return false;
     }

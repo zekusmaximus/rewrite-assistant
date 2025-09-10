@@ -217,22 +217,21 @@ const SettingsModal: React.FC = () => {
 
   // Lock background scroll while the modal is open
   useEffect(() => {
+    if (!isSettingsOpen) return;
     document.body.classList.add('overflow-hidden');
     return () => {
       document.body.classList.remove('overflow-hidden');
     };
-  }, []);
+  }, [isSettingsOpen]);
 
-  // Debug mount/unmount
+  // Debug open/close transitions
   useEffect(() => {
-    console.debug('[SettingsModal] mounted');
-    return () => {
-      console.debug('[SettingsModal] unmounted');
-    };
-  }, []);
+    console.debug('[SettingsModal]', isSettingsOpen ? 'open' : 'closed');
+  }, [isSettingsOpen]);
 
-  // Close on Escape
+  // Close on Escape (only while open)
   useEffect(() => {
+    if (!isSettingsOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         closeSettings();
@@ -242,7 +241,7 @@ const SettingsModal: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [closeSettings]);
+  }, [isSettingsOpen, closeSettings]);
 
   const handleSave = async () => {
     const success = await saveSettings();
@@ -262,6 +261,9 @@ const SettingsModal: React.FC = () => {
     }
   };
 
+  if (!isSettingsOpen) {
+    return null;
+  }
   return createPortal(
     <div
       className="fixed inset-0 z-[1000] flex items-center justify-center"
