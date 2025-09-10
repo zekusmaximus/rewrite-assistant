@@ -38,16 +38,7 @@ const neutralButtonClass =
 
 const errorTextClass = 'mt-1 text-xs text-red-600';
 
-const APIKeyForm: React.FC<APIKeyFormProps> = ({
-  apiKey,
-  model,
-  baseUrl,
-  disabled,
-  isTesting,
-  modelOptions,
-  defaultModel,
-  validationErrors,
-  isApiKeyValid,
+const APIKeyForm: React.FC<APIKeyFormProps> = ({ apiKey, model, baseUrl, disabled, isTesting, modelOptions, defaultModel: _defaultModel, validationErrors, isApiKeyValid: _isApiKeyValid,
   onApiKeyChange,
   onModelChange,
   onBaseUrlChange,

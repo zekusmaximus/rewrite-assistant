@@ -57,21 +57,21 @@ function tryInitiateDynamicImport(): void {
   try {
     // Use non-literal dynamic specifiers so TypeScript doesn't try to resolve missing modules.
     const m1 = 'js-tiktoken';
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     (import(m1 as any) as Promise<any>)
       .then((mod: any) => {
         tiktokenModule = mod;
       })
       .catch(() => {
         const m2 = '@dqbd/tiktoken';
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         return (import(m2 as any) as Promise<any>)
           .then((mod: any) => {
             tiktokenModule = mod;
           })
           .catch(() => {});
       });
-  } catch {}
+  } catch { /* empty */ }
 }
 
 // Get an encoder length function for a given model if the module has loaded.
@@ -89,7 +89,7 @@ function getEncoderLenIfReady(modelId: string): ((text: string) => number) | nul
           } finally {
             // Some encoders have a free() API; guard it if present
             if (typeof enc.free === 'function') {
-              try { enc.free(); } catch {}
+              try { enc.free(); } catch { /* empty */ }
             }
           }
         };
@@ -102,7 +102,7 @@ function getEncoderLenIfReady(modelId: string): ((text: string) => number) | nul
         return (text: string) => enc.encode(text ?? '').length || 0;
       }
     }
-  } catch {}
+  } catch { /* empty */ }
   return null;
 }
 
@@ -147,7 +147,7 @@ export function estimateTokensForModel(modelId: string, text: string): number {
     try {
       const n = encoderLen(text ?? '');
       if (Number.isFinite(n) && n > 0) return n;
-    } catch {}
+    } catch { /* empty */ }
   }
   // Claude and Gemini: approximate via chars/token ratio when tokenizer is absent
   return heuristicTokens(modelId, text ?? '');

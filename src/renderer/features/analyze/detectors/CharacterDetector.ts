@@ -377,7 +377,7 @@ function mapAICharacterIssues(
 }
 
 // ---------- Local assessment helpers (<= 40 lines each) ----------
-function assessFirstAppearanceIssues(
+function _assessFirstAppearanceIssues(
   currentNames: readonly NameOccurrence[],
   reg: PreviousRegistry
 ): { issues: ContinuityIssue[]; unknownFirstMentions: number } {
@@ -401,7 +401,7 @@ function assessFirstAppearanceIssues(
   return { issues, unknownFirstMentions: count };
 }
 
-function assessRelationshipAssumptions(
+function _assessRelationshipAssumptions(
   sentences: readonly { text: string; start: number; end: number }[],
   currentNames: readonly NameOccurrence[],
   previousScenes: readonly Scene[]
@@ -432,7 +432,7 @@ function assessRelationshipAssumptions(
   return { issues, relTermsFound };
 }
 
-function assessPronounBeforeNaming(
+function _assessPronounBeforeNaming(
   sceneText: string,
   sentences: readonly { start: number; end: number }[],
   currentNames: readonly NameOccurrence[],

@@ -14,7 +14,7 @@ import { estimateCost as estimateUsdCost } from '../optimization/Pricing';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 
-function costTierForModel(model: string | undefined): 'low' | 'medium' | 'high' {
+function _costTierForModel(model: string | undefined): 'low' | 'medium' | 'high' {
   const m = (model ?? '').toLowerCase();
   if (m.includes('opus') || m.includes('o')) return 'high';
   if (m.includes('sonnet') || m.includes('haiku') || m.includes('sonnet-4')) return 'medium';
@@ -105,7 +105,9 @@ export class ClaudeProvider extends BaseProvider<ClaudeConfig> {
       let outputText = '';
       try {
         outputText = raw?.content?.[0]?.text ?? '';
-      } catch {}
+      } catch {
+        // Intentionally no-op: best-effort extraction; fall back to usage or token estimation if absent.
+      }
       let outputTokensEstimate =
         raw && raw.usage && Number.isFinite(raw.usage.output_tokens)
           ? Math.max(0, Number(raw.usage.output_tokens))

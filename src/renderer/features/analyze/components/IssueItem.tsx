@@ -11,7 +11,7 @@ export interface IssueItemProps {
   className?: string;
 }
 
-const SEVERITY_ORDER: Record<'must-fix' | 'should-fix' | 'consider', number> = {
+const _SEVERITY_ORDER: Record<'must-fix' | 'should-fix' | 'consider', number> = {
   'must-fix': 3,
   'should-fix': 2,
   'consider': 1,

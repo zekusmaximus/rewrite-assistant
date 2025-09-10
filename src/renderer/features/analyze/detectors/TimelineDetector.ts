@@ -369,7 +369,7 @@ function seasonBucketSet(markers: readonly BasicMarker[]): Set<string> {
 function detectTimelineIssues(
   markers: readonly BasicMarker[],
   reg: PreviousTimelineRegistry,
-  sceneText: string
+  _sceneText: string
 ): ContinuityIssue[] {
   const issues: ContinuityIssue[] = [];
   const lowMarks = markers.map(m => ({ ...m, low: m.text.toLowerCase() }));

@@ -73,17 +73,17 @@ export interface BaseProviderConfig {
 /**
  * Claude (Anthropic) provider configuration.
  */
-export interface ClaudeConfig extends BaseProviderConfig {}
+export type ClaudeConfig = BaseProviderConfig;
 
 /**
  * OpenAI provider configuration.
  */
-export interface OpenAIConfig extends BaseProviderConfig {}
+export type OpenAIConfig = BaseProviderConfig;
 
 /**
  * Gemini (Google) provider configuration.
  */
-export interface GeminiConfig extends BaseProviderConfig {}
+export type GeminiConfig = BaseProviderConfig;
 
 /**
  * Base error for provider-related failures.

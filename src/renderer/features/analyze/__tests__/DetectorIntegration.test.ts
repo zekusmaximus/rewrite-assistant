@@ -41,7 +41,7 @@ function buildPrev(n = 2): Scene[] {
   })) as Scene[];
 }
 
-function buildReader(): ReaderKnowledge {
+function _buildReader(): ReaderKnowledge {
   return {
     knownCharacters: new Set(['Alice']),
     establishedTimeline: [],

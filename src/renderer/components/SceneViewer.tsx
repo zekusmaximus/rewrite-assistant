@@ -2,7 +2,7 @@ import React, { forwardRef, useImperativeHandle, useMemo, useRef, useState } fro
 import { useManuscriptStore } from '../stores/manuscriptStore';
 import useIssueHighlighting from '../features/analyze/hooks/useIssueHighlighting';
 import IssueHighlighter from '../features/analyze/components/IssueHighlighter';
-import type { Scene, ReaderKnowledge, ContinuityIssue } from '../../shared/types';
+import type { ContinuityIssue } from '../../shared/types';
 import useRewriteStore from '../features/rewrite/stores/rewriteStore';
 import RewriteEditor from '../features/rewrite/components/RewriteEditor';
 
@@ -10,35 +10,9 @@ export interface SceneViewerHandle {
   scrollToIssue(sceneId: string, issue: ContinuityIssue): void;
 }
 
-// Helper: focused reader context builder
-const buildReaderContext = (previousScenes: Scene[]): ReaderKnowledge => {
-  const context: ReaderKnowledge = {
-    knownCharacters: new Set<string>(),
-    establishedTimeline: [],
-    revealedPlotPoints: [],
-    establishedSettings: [],
-  };
-
-  previousScenes.forEach((scene) => {
-    scene.characters?.forEach((char) => context.knownCharacters.add(char));
-    scene.timeMarkers?.forEach((marker) => {
-      context.establishedTimeline.push({ label: marker });
-    });
-    scene.locationMarkers?.forEach((loc) => {
-      context.establishedSettings.push({ name: loc });
-    });
-    if (Array.isArray((scene as any).plotMarkers)) {
-      (scene as any).plotMarkers.forEach((p: string) => {
-        context.revealedPlotPoints.push(p);
-      });
-    }
-  });
-
-  return context;
-};
 
 const SceneViewer = forwardRef<SceneViewerHandle>((_props, ref) => {
-  const { getSelectedScene, manuscript } = useManuscriptStore();
+  const { getSelectedScene } = useManuscriptStore();
   const selectedScene = getSelectedScene();
   const analysis = selectedScene?.continuityAnalysis;
 
@@ -233,4 +207,6 @@ const SceneViewer = forwardRef<SceneViewerHandle>((_props, ref) => {
   );
 });
 
+SceneViewer.displayName = 'SceneViewer';
+ 
 export default SceneViewer;

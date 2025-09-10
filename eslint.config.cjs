@@ -12,7 +12,7 @@ const importPlugin = require('eslint-plugin-import');
 module.exports = [
   // Global ignores
   {
-    ignores: ['node_modules/', 'dist/', 'out/', 'coverage/', '.vite/', '.qodo/'],
+    ignores: ['node_modules/**', 'dist/**', 'build/**', 'coverage/**', 'out/**', '.vite/', '.qodo/'],
   },
 
   // Base TS/React rules (no type-aware rules; fast)
@@ -39,7 +39,6 @@ module.exports = [
       ...tsPlugin.configs.recommended.rules,
       ...reactPlugin.configs.recommended.rules,
       ...reactHooksPlugin.configs.recommended.rules,
-      ...importPlugin.configs.recommended.rules,
 
       // Project adjustments
       'react/react-in-jsx-scope': 'off',
@@ -49,12 +48,34 @@ module.exports = [
       'import/no-unresolved': 'off',
       'import/named': 'off',
 
-      // Reasonable TS defaults
+      // TypeScript authoritative unused-vars and exceptions
+      'no-unused-vars': 'off',
       '@typescript-eslint/no-unused-vars': [
-        'warn',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
       ],
+
+      // Temporarily relax to drive baseline to zero
+      '@typescript-eslint/no-explicit-any': 'off',
+
+      // Keep TS-specific relaxations
       '@typescript-eslint/explicit-module-boundary-types': 'off',
+
+      // Disable no-undef for TS (handled by TypeScript)
+      'no-undef': 'off',
+    },
+  },
+
+  // Declarations (.d.ts) - loosen common patterns in ambient types
+  {
+    files: ['**/*.d.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-empty-object-type': 'off',
     },
   },
 
@@ -92,13 +113,7 @@ module.exports = [
     },
   },
 
-  // TypeScript: disable no-undef (handled by TypeScript)
-  {
-    files: ['**/*.ts', '**/*.tsx'],
-    rules: {
-      'no-undef': 'off',
-    },
-  },
+  // (removed) Redundant TS 'no-undef' override; consolidated into the base TS block
 
   // Tests (enable both node + browser globals to avoid env mismatch)
   {

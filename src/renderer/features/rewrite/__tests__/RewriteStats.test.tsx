@@ -49,7 +49,7 @@ beforeEach(() => {
     selectedSceneId: null,
     isLoading: false,
     error: null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   } as any);
 
   // Seed rewrite store with one rewrite for s2
@@ -68,7 +68,7 @@ beforeEach(() => {
   useRewriteStore.setState({
     sceneRewrites: new Map<string, RewriteVersion[]>([['s2', [rv]]]),
     batchProgress: undefined
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   } as any);
 });
 

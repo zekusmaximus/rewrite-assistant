@@ -447,7 +447,15 @@ function sliceOuterJson(s: string): string | null {
 export type ValidationMeta = { attempts: number; repaired: boolean; errors: string[] };
 
 function cleanText(s: string): string {
-  return s.replace(/[\x00-\x1F\x7F]/g, '').trim();
+  // Remove ASCII control chars (0x00–0x1F) and DEL (0x7F) without using a regex to satisfy no-control-regex
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code >= 0x20 && code !== 0x7f) {
+      out += s[i];
+    }
+  }
+  return out.trim();
 }
 
 function clamp01(x: number): number {
@@ -738,26 +746,23 @@ function modelToLegacyIssues(data: ModelAnalysisResponse): ContinuityIssue[] {
   });
 }
 
-// ------------ Public API (overloaded) ------------
+ // ------------ Public API (single entry with interface overloads) ------------
 
-export function validateAndNormalize(
-  raw: unknown,
-  options?: { retries?: number }
-): { data: ModelAnalysisResponse; meta: ValidationMeta };
-export function validateAndNormalize(
-  provider: ProviderName,
-  raw: unknown,
-  fallbackModelLabel: string
-): AppAnalysisResponse;
-// Implementation
+export interface ValidateAndNormalize {
+  (raw: unknown, options?: { retries?: number }): { data: ModelAnalysisResponse; meta: ValidationMeta };
+  (provider: ProviderName, raw: unknown, fallbackModelLabel: string): AppAnalysisResponse;
+}
+
+ // Function overloads to satisfy ValidateAndNormalize without ambiguous union return
+/* eslint-disable no-redeclare */
+export function validateAndNormalize(raw: unknown, options?: { retries?: number }): { data: ModelAnalysisResponse; meta: ValidationMeta };
+export function validateAndNormalize(provider: ProviderName, raw: unknown, fallbackModelLabel: string): AppAnalysisResponse;
 export function validateAndNormalize(
   a: unknown,
   b?: unknown,
   c?: unknown
-): { data: ModelAnalysisResponse; meta: ValidationMeta } | AppAnalysisResponse {
-  // Overload dispatcher
+) {
   if (isProviderName(a)) {
-    // Legacy API: (provider, raw, fallbackModelLabel) -> AppAnalysisResponse
     const provider = a as ProviderName;
     const raw = b as unknown;
     const fallbackModelLabel = String(c ?? '');
@@ -784,7 +789,6 @@ export function validateAndNormalize(
       throw new ValidationError(a as ProviderName, 'Response validation failed');
     }
   } else {
-    // New primary API: (raw, options?) -> { data, meta }
     const retries = isObject(b) && isNumberFinite((b as any).retries) ? Math.max(1, Math.trunc((b as any).retries)) : 4;
     const result = parseModelOutputToZod(a, retries);
     if (!result.ok) {
@@ -793,3 +797,4 @@ export function validateAndNormalize(
     return { data: result.data, meta: result.meta };
   }
 }
+/* eslint-enable no-redeclare */

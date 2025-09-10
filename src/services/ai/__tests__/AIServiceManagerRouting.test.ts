@@ -107,15 +107,15 @@ describe('AIServiceManager adaptive routing', () => {
     // Stub analyze for all configured models
     providers.forEach((prov, id) => {
       if (id === 'claude-3-5-haiku') {
-        prov.analyze = vi.fn(async (req: AnalysisRequest) => makeResponse('claude-3-5-haiku', 'anthropic', 0.85, 120));
+        prov.analyze = vi.fn(async (_req: AnalysisRequest) => makeResponse('claude-3-5-haiku', 'anthropic', 0.85, 120));
       } else if (id === 'claude-opus-4-1') {
-        prov.analyze = vi.fn(async (req: AnalysisRequest) => makeResponse('claude-opus-4-1', 'anthropic', 0.9, 300));
+        prov.analyze = vi.fn(async (_req: AnalysisRequest) => makeResponse('claude-opus-4-1', 'anthropic', 0.9, 300));
       } else if (id === 'claude-sonnet-4') {
-        prov.analyze = vi.fn(async (req: AnalysisRequest) => makeResponse('claude-sonnet-4', 'anthropic', 0.82, 180));
+        prov.analyze = vi.fn(async (_req: AnalysisRequest) => makeResponse('claude-sonnet-4', 'anthropic', 0.82, 180));
       } else if (id === 'gpt-5') {
-        prov.analyze = vi.fn(async (req: AnalysisRequest) => makeResponse('gpt-5', 'openai', 0.8, 200));
+        prov.analyze = vi.fn(async (_req: AnalysisRequest) => makeResponse('gpt-5', 'openai', 0.8, 200));
       } else if (id === 'gemini-2-5-pro') {
-        prov.analyze = vi.fn(async (req: AnalysisRequest) => makeResponse('gemini-2-5-pro', 'google', 0.8, 220));
+        prov.analyze = vi.fn(async (_req: AnalysisRequest) => makeResponse('gemini-2-5-pro', 'google', 0.8, 220));
       }
     });
 
@@ -136,14 +136,14 @@ describe('AIServiceManager adaptive routing', () => {
     // Force base fast model to low confidence to trigger escalation, strong to high confidence
     providers.forEach((prov, id) => {
       if (id === 'claude-3-5-haiku') {
-        prov.analyze = vi.fn(async (req: AnalysisRequest) => makeResponse('claude-3-5-haiku', 'anthropic', 0.5, 120)); // below 0.65 simple threshold
+        prov.analyze = vi.fn(async (_req: AnalysisRequest) => makeResponse('claude-3-5-haiku', 'anthropic', 0.5, 120)); // below 0.65 simple threshold
       } else if (id === 'claude-opus-4-1') {
-        prov.analyze = vi.fn(async (req: AnalysisRequest) => makeResponse('claude-opus-4-1', 'anthropic', 0.9, 300));
+        prov.analyze = vi.fn(async (_req: AnalysisRequest) => makeResponse('claude-opus-4-1', 'anthropic', 0.9, 300));
       } else if (!prov.analyze) {
-        prov.analyze = vi.fn(async (req: AnalysisRequest) => makeResponse(id, 'openai', 0.8, 200));
+        prov.analyze = vi.fn(async (_req: AnalysisRequest) => makeResponse(id, 'openai', 0.8, 200));
       } else {
         // leave other stubs as-is or default
-        prov.analyze = vi.fn(async (req: AnalysisRequest) => makeResponse(id, 'openai', 0.8, 200));
+        prov.analyze = vi.fn(async (_req: AnalysisRequest) => makeResponse(id, 'openai', 0.8, 200));
       }
     });
 
@@ -169,12 +169,12 @@ describe('AIServiceManager adaptive routing', () => {
     const providers = (mgr as any).providers as Map<string, any>;
     providers.forEach((prov, id) => {
       if (id === 'gpt-5') {
-        prov.analyze = vi.fn(async (req: AnalysisRequest) => makeResponse('gpt-5', 'openai', 0.88, 190));
+        prov.analyze = vi.fn(async (_req: AnalysisRequest) => makeResponse('gpt-5', 'openai', 0.88, 190));
       } else if (id === 'claude-3-5-haiku') {
         // Good but slightly lower confidence, so selection should favor GPT given boosted tracker score
-        prov.analyze = vi.fn(async (req: AnalysisRequest) => makeResponse('claude-3-5-haiku', 'anthropic', 0.82, 130));
+        prov.analyze = vi.fn(async (_req: AnalysisRequest) => makeResponse('claude-3-5-haiku', 'anthropic', 0.82, 130));
       } else {
-        prov.analyze = vi.fn(async (req: AnalysisRequest) => makeResponse(id, 'openai', 0.8, 200));
+        prov.analyze = vi.fn(async (_req: AnalysisRequest) => makeResponse(id, 'openai', 0.8, 200));
       }
     });
 

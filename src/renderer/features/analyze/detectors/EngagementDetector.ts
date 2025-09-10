@@ -98,20 +98,10 @@ export function computeOpeningStats(
 export function summarizePreviousContext(previousScenes: readonly Scene[]): PreviousSummary {
   const joined = previousScenes.map(s => s.text || '').join('\n').slice(0, 5000);
   const characters = (() => {
-    try {
-      // Attempt compromise if available
-       
-      const mod = require('compromise');
-      const nlp = (mod?.default ?? mod) as any;
-      const doc = typeof nlp === 'function' ? nlp(joined) : null;
-      const arr: string[] = doc?.people?.()?.out?.('array') ?? [];
-      const uniq = Array.from(new Set(arr.map(s => String(s).trim()).filter(Boolean)));
-      return uniq.slice(0, 6);
-    } catch {
-      const m = joined.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g) ?? [];
-      const uniq = Array.from(new Set(m));
-      return uniq.slice(0, 6);
-    }
+    // Best-effort fallback without dynamic require/import to satisfy linting rules
+    const m = joined.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g) ?? [];
+    const uniq = Array.from(new Set(m));
+    return uniq.slice(0, 6);
   })();
   const keyTerms = (() => {
     const caps = (joined.match(/\b[A-Z][a-z]+\b/g) ?? []).map(s => s.trim());

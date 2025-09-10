@@ -4,7 +4,7 @@ import { IPC_CHANNELS } from '../../shared/constants';
 // Hoisted state so it's initialized before hoisted mocks execute
 const hoisted = vi.hoisted(() => {
   return {
-    registry: {} as Record<string, Function>,
+    registry: {} as Record<string, (...args: unknown[]) => unknown>,
     mockSend: vi.fn(),
     windows: [] as any[],
   };
@@ -43,7 +43,7 @@ vi.mock('electron', () => {
       quit: vi.fn(),
     },
     ipcMain: {
-      handle: vi.fn((channel: string, fn: Function) => {
+      handle: vi.fn((channel: string, fn: (...args: unknown[]) => unknown) => {
         registry[channel] = fn;
       }),
       on: vi.fn(),
@@ -102,7 +102,7 @@ describe('IPC rewrite handler', () => {
   const handlers = hoisted.registry;
   const mockSend = hoisted.mockSend;
 
-  const resolveRewriteHandler = (): Function | undefined => {
+  const resolveRewriteHandler = (): ((...args: unknown[]) => unknown) | undefined => {
     const preferred = handlers[IPC_CHANNELS.GENERATE_REWRITE];
     if (typeof preferred === 'function') return preferred;
     const all = Object.keys(handlers);
@@ -117,7 +117,7 @@ describe('IPC rewrite handler', () => {
     const fn = resolveRewriteHandler();
     expect(fn, `Available channels: ${Object.keys(handlers).join(', ')}`).toBeTypeOf('function');
 
-    const res1 = await (fn as Function)({}, { scene: null, issues: [] });
+    const res1 = await (fn as (...args: unknown[]) => unknown)({}, { scene: null, issues: [] });
     // Expect standardized error shape from toErrorResponse()
     expect(res1).toEqual(
       expect.objectContaining({
@@ -128,7 +128,7 @@ describe('IPC rewrite handler', () => {
       })
     );
 
-    const res2 = await (fn as Function)({}, { scene: { id: 's1', text: 'x' }, issues: [] });
+    const res2 = await (fn as (...args: unknown[]) => unknown)({}, { scene: { id: 's1', text: 'x' }, issues: [] }) as any;
     expect(res2.ok).toBe(false);
   });
 
@@ -150,7 +150,7 @@ describe('IPC rewrite handler', () => {
       preserveElements: [],
     };
 
-    const result = await (fn as Function)({}, payload);
+    const result = await (fn as (...args: unknown[]) => unknown)({}, payload) as any;
     expect(result.success).toBe(true);
     expect(result.rewrittenText).toBe('rewritten text');
 

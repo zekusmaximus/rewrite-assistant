@@ -25,10 +25,6 @@ const TYPE_LABELS: Record<IssueKind, string> = {
 function IssuePanel(props: IssuePanelProps) {
   const { isOpen = true, onClose, className, onShowInScene } = props;
 
-  // Collapsed placeholder (parent manages layout space)
-  if (isOpen === false) {
-    return <div className={className} />;
-  }
 
   const manuscript = useManuscriptStore((s) => s.manuscript);
 
@@ -42,6 +38,7 @@ function IssuePanel(props: IssuePanelProps) {
     progress,
     selectedIssueTypes,
   } = useAnalysis();
+
 
   // Moved scenes (ids and map for context)
   const movedScenes = useMemo(() => {
@@ -132,6 +129,16 @@ function IssuePanel(props: IssuePanelProps) {
       </button>
     );
   };
+
+  // Guard return after all hooks are declared to satisfy rules-of-hooks
+  if (!isOpen) {
+    return <div className={className} />;
+  }
+
+  // Guard return after all hooks to keep hooks order stable
+  if (!isOpen) {
+    return <div className={className} />;
+  }
 
   return (
     <div className={['w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/40', className].filter(Boolean).join(' ')}>

@@ -44,7 +44,7 @@ beforeEach(async () => {
 afterEach(async () => {
   try {
     await fs.rm(userDataDir, { recursive: true, force: true });
-  } catch {}
+  } catch { /* empty */ }
 });
 
 describe('SettingsService security and persistence', () => {
@@ -76,7 +76,7 @@ describe('SettingsService security and persistence', () => {
   it('returns defaults when settings.json is missing', async () => {
     const service = await importService();
     // ensure file is absent
-    try { await fs.rm(settingsFilePath(), { force: true }); } catch {}
+    try { await fs.rm(settingsFilePath(), { force: true }); } catch { /* empty */ }
 
     const loaded = await service.loadSettings();
 
