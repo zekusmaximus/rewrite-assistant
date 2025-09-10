@@ -2,7 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import ProviderSection from './ProviderSection';
 import APIKeyForm from './APIKeyForm';
-import { useSettingsStore } from '../stores';
+import { useSettingsStore } from '../stores/useSettingsStore';
 import type { ProviderConfig, ProviderName, ProvidersConfigMap } from '../types';
 import { useAPIConfiguration } from '../hooks/useAPIConfiguration';
 

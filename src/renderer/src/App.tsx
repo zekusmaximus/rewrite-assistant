@@ -8,7 +8,7 @@ import IssuePanel from '../features/analyze/components/IssuePanel';
 import useAnalysis from '../features/analyze/hooks/useAnalysis';
 import type { ContinuityIssue } from '../../shared/types';
 import RewritePanel from '../features/rewrite/components/RewritePanel';
-import { useSettingsStore } from '../features/settings/stores';
+import { useSettingsStore } from '../features/settings/stores/useSettingsStore';
 import { SettingsModal } from '../features/settings/components';
 import ExportDialog from '../features/export/components/ExportDialog';
  
