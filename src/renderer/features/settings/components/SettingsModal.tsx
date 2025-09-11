@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import ProviderSection from './ProviderSection';
-import APIKeyForm from './APIKeyForm';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import type { ProviderConfig, ProviderName, ProvidersConfigMap } from '../types';
 import { useAPIConfiguration } from '../hooks/useAPIConfiguration';
@@ -9,22 +7,273 @@ import { useAPIConfiguration } from '../hooks/useAPIConfiguration';
 type TestStatus = 'idle' | 'testing' | 'success' | 'error';
 
 const StatusPill: React.FC<{ status: TestStatus }> = ({ status }) => {
-  const map: Record<string, string> = {
-    idle: 'bg-gray-100 text-gray-700',
-    testing: 'bg-yellow-100 text-yellow-800',
-    success: 'bg-green-100 text-green-800',
-    error: 'bg-red-100 text-red-800',
+  const styles = {
+    idle: { backgroundColor: '#f3f4f6', color: '#374151' },
+    testing: { backgroundColor: '#fef3c7', color: '#92400e' },
+    success: { backgroundColor: '#d1fae5', color: '#065f46' },
+    error: { backgroundColor: '#fee2e2', color: '#991b1b' },
   };
-  const labelMap: Record<string, string> = {
+  const labels = {
     idle: 'Idle',
     testing: 'Testing…',
     success: 'Success',
     error: 'Error',
   };
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[status]}`}>
-      {labelMap[status]}
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      padding: '2px 8px',
+      borderRadius: '4px',
+      fontSize: '12px',
+      fontWeight: '500',
+      ...styles[status]
+    }}>
+      {labels[status]}
     </span>
+  );
+};
+
+// Enhanced ProviderSection with inline styles
+const ProviderSection: React.FC<{
+  title: string;
+  enabled: boolean;
+  onToggleEnabled: (enabled: boolean) => void;
+  status?: React.ReactNode;
+  children: React.ReactNode;
+}> = ({ title, enabled, onToggleEnabled, status, children }) => {
+  return (
+    <section style={{
+      backgroundColor: 'white',
+      border: '1px solid #d1d5db',
+      borderRadius: '8px',
+      padding: '16px',
+      marginBottom: '16px'
+    }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '12px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <h3 style={{
+            fontSize: '16px',
+            fontWeight: '600',
+            color: '#111827',
+            margin: 0
+          }}>
+            {title}
+          </h3>
+          {status && <div>{status}</div>}
+        </div>
+        
+        {/* Enhanced Toggle Switch */}
+        <label style={{
+          display: 'flex',
+          alignItems: 'center',
+          cursor: 'pointer',
+          gap: '8px'
+        }}>
+          <div 
+            onClick={() => onToggleEnabled(!enabled)}
+            style={{
+              position: 'relative',
+              width: '44px',
+              height: '24px',
+              backgroundColor: enabled ? '#2563eb' : '#d1d5db',
+              borderRadius: '12px',
+              transition: 'background-color 0.2s',
+              cursor: 'pointer'
+            }}
+          >
+            <div style={{
+              position: 'absolute',
+              top: '2px',
+              left: enabled ? '22px' : '2px',
+              width: '20px',
+              height: '20px',
+              backgroundColor: 'white',
+              borderRadius: '10px',
+              transition: 'left 0.2s',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+            }} />
+          </div>
+          <span style={{
+            fontSize: '14px',
+            color: '#374151',
+            fontWeight: enabled ? '600' : '400'
+          }}>
+            {enabled ? 'Enabled' : 'Disabled'}
+          </span>
+        </label>
+      </div>
+
+      {/* Form content */}
+      <div style={{
+        opacity: enabled ? 1 : 0.6
+      }}>
+        {children}
+      </div>
+    </section>
+  );
+};
+
+// Enhanced APIKeyForm with inline styles
+const APIKeyForm: React.FC<{
+  apiKey: string;
+  model?: string;
+  baseUrl?: string;
+  disabled?: boolean;
+  isTesting?: boolean;
+  modelOptions: string[];
+  defaultModel: string;
+  validationErrors?: { apiKey?: string; model?: string; baseUrl?: string };
+  onApiKeyChange: (value: string) => void;
+  onModelChange: (value: string) => void;
+  onBaseUrlChange: (value: string) => void;
+  onTest: () => void;
+}> = ({
+  apiKey, model, baseUrl, disabled, isTesting, modelOptions, validationErrors,
+  onApiKeyChange, onModelChange, onBaseUrlChange, onTest
+}) => {
+  const [showKey, setShowKey] = React.useState(false);
+
+  const inputStyle = {
+    width: '100%',
+    padding: '8px 12px',
+    border: '1px solid #d1d5db',
+    borderRadius: '6px',
+    fontSize: '14px',
+    backgroundColor: disabled ? '#f9fafb' : 'white',
+    color: disabled ? '#9ca3af' : '#111827'
+  };
+
+  const buttonStyle = {
+    padding: '8px 16px',
+    fontSize: '14px',
+    fontWeight: '500',
+    borderRadius: '6px',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.6 : 1
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {/* API Key */}
+      <div>
+        <label style={{
+          display: 'block',
+          fontSize: '14px',
+          fontWeight: '500',
+          color: '#374151',
+          marginBottom: '4px'
+        }}>
+          API Key
+        </label>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input
+            type={showKey ? 'text' : 'password'}
+            style={inputStyle}
+            value={apiKey}
+            onChange={(e) => onApiKeyChange(e.target.value)}
+            placeholder="Enter API key"
+            disabled={disabled}
+          />
+          <button
+            type="button"
+            style={{
+              ...buttonStyle,
+              backgroundColor: '#f3f4f6',
+              color: '#374151',
+              border: '1px solid #d1d5db'
+            }}
+            onClick={() => setShowKey(!showKey)}
+            disabled={disabled}
+          >
+            {showKey ? 'Hide' : 'Show'}
+          </button>
+        </div>
+        {validationErrors?.apiKey && (
+          <p style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
+            {validationErrors.apiKey}
+          </p>
+        )}
+      </div>
+
+      {/* Model and Base URL */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+        <div>
+          <label style={{
+            display: 'block',
+            fontSize: '14px',
+            fontWeight: '500',
+            color: '#374151',
+            marginBottom: '4px'
+          }}>
+            Model
+          </label>
+          <select
+            style={inputStyle}
+            value={model || ''}
+            onChange={(e) => onModelChange(e.target.value)}
+            disabled={disabled}
+          >
+            <option value="">Select a model</option>
+            {modelOptions.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+          {validationErrors?.model && (
+            <p style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
+              {validationErrors.model}
+            </p>
+          )}
+        </div>
+        
+        <div>
+          <label style={{
+            display: 'block',
+            fontSize: '14px',
+            fontWeight: '500',
+            color: '#374151',
+            marginBottom: '4px'
+          }}>
+            Base URL (optional)
+          </label>
+          <input
+            type="text"
+            style={inputStyle}
+            value={baseUrl || ''}
+            onChange={(e) => onBaseUrlChange(e.target.value)}
+            placeholder="https://api.example.com"
+            disabled={disabled}
+          />
+          {validationErrors?.baseUrl && (
+            <p style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
+              {validationErrors.baseUrl}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Test Button */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          style={{
+            ...buttonStyle,
+            backgroundColor: disabled ? '#9ca3af' : '#2563eb',
+            color: 'white',
+            border: 'none'
+          }}
+          onClick={onTest}
+          disabled={disabled || isTesting || !!validationErrors?.apiKey}
+        >
+          {isTesting ? 'Testing…' : 'Test Connection'}
+        </button>
+      </div>
+    </div>
   );
 };
 
@@ -104,7 +353,10 @@ const ProviderBlock: React.FC<{
   const cfg = ensureConfig(providers[provider]);
   const status = testResults[provider];
 
+  console.log(`[ProviderBlock ${provider}] enabled:`, cfg.enabled, 'config:', cfg);
+
   const handleToggleEnabled = (enabled: boolean) => {
+    console.log(`[ProviderBlock ${provider}] Toggle to:`, enabled);
     const next: Partial<ProviderConfig> = { enabled };
     if (enabled && !cfg.model) {
       next.model = defaultModel;
@@ -139,7 +391,7 @@ const ProviderBlock: React.FC<{
   return (
     <ProviderSection
       title={title}
-      enabled={!!cfg.enabled}
+      enabled={cfg.enabled}
       onToggleEnabled={handleToggleEnabled}
       status={<StatusPill status={status} />}
     >
@@ -165,13 +417,15 @@ const SettingsModal: React.FC = () => {
   const { closeSettings, activeTab, setActiveTab, saveSettings, providers, isSettingsOpen, loadSettings } = useSettingsStore();
   const { configureProviders } = useAPIConfiguration();
 
+  console.log('[SettingsModal] Rendering, isOpen:', isSettingsOpen, 'providers:', providers);
+
   useEffect(() => {
     if (isSettingsOpen) {
       loadSettings();
     }
   }, [isSettingsOpen, loadSettings]);
 
-  // Compute validation errors locally (do not store in Zustand)
+  // Compute validation errors locally
   const validationMap: Record<ProviderName, ValidationErrors> = useMemo(() => {
     const res: Record<ProviderName, ValidationErrors> = {
       claude: {},
@@ -258,7 +512,6 @@ const SettingsModal: React.FC = () => {
 
   return createPortal(
     <div
-      // CRITICAL: Use inline styles to ensure visibility (Tailwind may not apply in Electron)
       style={{
         position: 'fixed',
         top: 0,
@@ -269,83 +522,95 @@ const SettingsModal: React.FC = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.6)',
-        backdropFilter: 'blur(1px)'
+        backgroundColor: 'rgba(0, 0, 0, 0.6)'
       }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="settings-modal-title"
     >
-      {/* Backdrop */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.6)',
-          backdropFilter: 'blur(1px)'
-        }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) {
-            closeSettings();
-          }
-        }}
-      />
-
       {/* Modal panel */}
-      <div 
-        className="relative bg-white dark:bg-slate-900 shadow-2xl ring-1 ring-black/5 border border-slate-200/60 dark:border-slate-700/60 rounded-xl flex flex-col overflow-hidden"
-        style={{
-          position: 'relative',
-          zIndex: 1100,
-          width: 'min(900px, calc(100vw - 2rem))',
-          maxHeight: '85vh'
-        }}
-      >
+      <div style={{
+        position: 'relative',
+        zIndex: 1100,
+        backgroundColor: 'white',
+        borderRadius: '12px',
+        width: 'min(900px, calc(100vw - 2rem))',
+        maxHeight: '85vh',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+      }}>
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-          <h2 id="settings-modal-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '16px 24px',
+          borderBottom: '1px solid #e5e7eb'
+        }}>
+          <h2 id="settings-modal-title" style={{
+            fontSize: '18px',
+            fontWeight: '600',
+            color: '#111827',
+            margin: 0
+          }}>
             Settings
           </h2>
           <button
             type="button"
             onClick={closeSettings}
+            style={{
+              fontSize: '24px',
+              color: '#6b7280',
+              backgroundColor: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '4px',
+              lineHeight: 1
+            }}
             aria-label="Close settings"
-            className="text-gray-500 hover:text-gray-700 focus:outline-none"
-            title="Close"
           >
             ×
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="px-4 pt-3">
-          <div
-            className="inline-flex rounded-md shadow-sm border border-gray-200 overflow-hidden"
-            role="tablist"
-            aria-label="Settings tabs"
-          >
+        <div style={{ padding: '16px 24px 0' }}>
+          <div style={{
+            display: 'inline-flex',
+            borderRadius: '6px',
+            border: '1px solid #e5e7eb',
+            overflow: 'hidden'
+          }}>
             <button
               type="button"
-              role="tab"
-              aria-selected={activeTab === 'api-keys'}
               onClick={() => setActiveTab('api-keys')}
-              className={`px-4 py-2 text-sm font-medium focus:outline-none ${
-                activeTab === 'api-keys' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
-              }`}
+              style={{
+                padding: '8px 16px',
+                fontSize: '14px',
+                fontWeight: '500',
+                backgroundColor: activeTab === 'api-keys' ? '#2563eb' : 'white',
+                color: activeTab === 'api-keys' ? 'white' : '#374151',
+                border: 'none',
+                cursor: 'pointer'
+              }}
             >
               API Keys
             </button>
             <button
               type="button"
-              role="tab"
-              aria-selected={activeTab === 'general'}
               onClick={() => setActiveTab('general')}
-              className={`px-4 py-2 text-sm font-medium focus:outline-none border-l border-gray-200 ${
-                activeTab === 'general' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
-              }`}
+              style={{
+                padding: '8px 16px',
+                fontSize: '14px',
+                fontWeight: '500',
+                backgroundColor: activeTab === 'general' ? '#2563eb' : 'white',
+                color: activeTab === 'general' ? 'white' : '#374151',
+                border: 'none',
+                borderLeft: '1px solid #e5e7eb',
+                cursor: 'pointer'
+              }}
             >
               General
             </button>
@@ -353,9 +618,13 @@ const SettingsModal: React.FC = () => {
         </div>
 
         {/* Content */}
-        <div className="p-4 flex-1 overflow-y-auto">
+        <div style={{
+          padding: '24px',
+          flex: 1,
+          overflowY: 'auto'
+        }}>
           {activeTab === 'api-keys' ? (
-            <div className="space-y-4">
+            <div>
               <ProviderBlock
                 provider="claude"
                 title="Claude (Anthropic)"
@@ -379,25 +648,54 @@ const SettingsModal: React.FC = () => {
               />
             </div>
           ) : (
-            <div className="text-sm text-gray-600 dark:text-gray-300">
+            <div style={{
+              fontSize: '14px',
+              color: '#6b7280',
+              padding: '32px',
+              textAlign: 'center'
+            }}>
               General settings will appear here. Coming soon.
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-3 border-t border-gray-200 flex justify-end gap-2">
+        <div style={{
+          padding: '16px 24px',
+          borderTop: '1px solid #e5e7eb',
+          display: 'flex',
+          justifyContent: 'flex-end',
+          gap: '8px'
+        }}>
           <button
             type="button"
             onClick={closeSettings}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            style={{
+              padding: '8px 16px',
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#374151',
+              backgroundColor: 'white',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              cursor: 'pointer'
+            }}
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={handleSave}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            style={{
+              padding: '8px 16px',
+              fontSize: '14px',
+              fontWeight: '500',
+              color: 'white',
+              backgroundColor: '#2563eb',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer'
+            }}
           >
             Save
           </button>
