@@ -52,107 +52,106 @@ const DEFAULT_TEST_RESULTS: Record<ProviderName, TestStatus> = {
   gemini: 'idle',
 };
 
-function createSettingsStore() {
-  return create<SettingsState>((set, get) => ({
-    // State
-    providers: { ...DEFAULT_PROVIDERS },
-    isSettingsOpen: false,
-    activeTab: 'api-keys',
-    testResults: { ...DEFAULT_TEST_RESULTS },
+// Factory function to create the store
+const createSettingsStore = () => create<SettingsState>((set, get) => ({
+  // State
+  providers: { ...DEFAULT_PROVIDERS },
+  isSettingsOpen: false,
+  activeTab: 'api-keys',
+  testResults: { ...DEFAULT_TEST_RESULTS },
 
-    // Actions
-    openSettings: () => {
-      console.log('[SettingsStore] openSettings');
-      set({ isSettingsOpen: true });
-    },
-    closeSettings: () => {
-      console.log('[SettingsStore] closeSettings');
-      // Phase 1: Close modal only. Data remains in-memory.
-      // TODO(Phase 4): Consider clearing transient state and implementing a focus trap and escape-to-close handling.
-      set({ isSettingsOpen: false });
-    },
-    setActiveTab: (tab: string) => set({ activeTab: tab }),
+  // Actions
+  openSettings: () => {
+    console.log('[SettingsStore] openSettings');
+    set({ isSettingsOpen: true });
+  },
+  closeSettings: () => {
+    console.log('[SettingsStore] closeSettings');
+    // Phase 1: Close modal only. Data remains in-memory.
+    // TODO(Phase 4): Consider clearing transient state and implementing a focus trap and escape-to-close handling.
+    set({ isSettingsOpen: false });
+  },
+  setActiveTab: (tab: string) => set({ activeTab: tab }),
 
-    updateProvider: (provider: ProviderName, partial: Partial<ProviderConfig>) =>
-      set((state) => {
-        const current = state.providers[provider] ?? defaultProvider();
-        // Never log secrets (api keys) here or elsewhere.
-        const merged: ProviderConfig = {
-          ...current,
-          ...partial,
-        };
-        return {
-          providers: {
-            ...state.providers,
-            [provider]: merged,
-          },
-        };
-      }),
+  updateProvider: (provider: ProviderName, partial: Partial<ProviderConfig>) =>
+    set((state) => {
+      const current = state.providers[provider] ?? defaultProvider();
+      // Never log secrets (api keys) here or elsewhere.
+      const merged: ProviderConfig = {
+        ...current,
+        ...partial,
+      };
+      return {
+        providers: {
+          ...state.providers,
+          [provider]: merged,
+        },
+      };
+    }),
 
-    testConnection: async (provider: ProviderName) => {
-      const state = get();
-      const config = state.providers[provider];
-      if (!config || !config.apiKey) return;
+  testConnection: async (provider: ProviderName) => {
+    const state = get();
+    const config = state.providers[provider];
+    if (!config || !config.apiKey) return;
 
+    set((s) => ({
+      testResults: { ...s.testResults, [provider]: 'testing' },
+    }));
+
+    try {
+      const result = await window.electronAPI.testConnection({ provider, config });
       set((s) => ({
-        testResults: { ...s.testResults, [provider]: 'testing' },
+        testResults: {
+          ...s.testResults,
+          [provider]: result.success ? 'success' : 'error',
+        },
       }));
+    } catch {
+      set((s) => ({
+        testResults: { ...s.testResults, [provider]: 'error' },
+      }));
+    }
+  },
 
-      try {
-        const result = await window.electronAPI.testConnection({ provider, config });
-        set((s) => ({
-          testResults: {
-            ...s.testResults,
-            [provider]: result.success ? 'success' : 'error',
-          },
-        }));
-      } catch {
-        set((s) => ({
-          testResults: { ...s.testResults, [provider]: 'error' },
-        }));
-      }
-    },
+  saveSettings: async () => {
+    const state = get();
+    try {
+      const result = await window.electronAPI.saveSettings({
+        providers: state.providers,
+        general: state.general ?? {} // retain or add general settings if present
+      });
+      return result.success;
+    } catch {
+      console.error('Failed to save settings');
+      return false;
+    }
+  },
 
-    saveSettings: async () => {
-      const state = get();
-      try {
-        const result = await window.electronAPI.saveSettings({
-          providers: state.providers,
-          general: state.general ?? {} // retain or add general settings if present
-        });
-        return result.success;
-      } catch {
-        console.error('Failed to save settings');
-        return false;
-      }
-    },
-
-    loadSettings: async () => {
-      try {
-        const settings = await window.electronAPI.loadSettings();
-        if (settings && settings.providers) {
-          set({
-            providers: settings.providers,
-            general: settings.general ?? get().general,
-            testResults: DEFAULT_TEST_RESULTS,
-            activeTab: 'api-keys',
-          });
-        }
-      } catch {
-        // Use defaults on error
+  loadSettings: async () => {
+    try {
+      const settings = await window.electronAPI.loadSettings();
+      if (settings && settings.providers) {
         set({
-          providers: { ...DEFAULT_PROVIDERS },
-          testResults: { ...DEFAULT_TEST_RESULTS },
+          providers: settings.providers,
+          general: settings.general ?? get().general,
+          testResults: DEFAULT_TEST_RESULTS,
           activeTab: 'api-keys',
         });
       }
-    },
-  }));
-}
+    } catch {
+      // Use defaults on error
+      set({
+        providers: { ...DEFAULT_PROVIDERS },
+        testResults: { ...DEFAULT_TEST_RESULTS },
+        activeTab: 'api-keys',
+      });
+    }
+  },
+}));
 
+// Singleton guard: ensure only one instance exists regardless of import paths
 declare global {
   var __settingsStore: ReturnType<typeof createSettingsStore> | undefined;
 }
 
-export const useSettingsStore =
-  globalThis.__settingsStore ?? (globalThis.__settingsStore = createSettingsStore());
+export const useSettingsStore = globalThis.__settingsStore ?? (globalThis.__settingsStore = createSettingsStore());
