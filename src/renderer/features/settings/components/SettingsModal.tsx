@@ -258,14 +258,35 @@ const SettingsModal: React.FC = () => {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center"
+      // CRITICAL: Use inline styles to ensure visibility (Tailwind may not apply in Electron)
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        backdropFilter: 'blur(1px)'
+      }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="settings-modal-title"
     >
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-[1px]"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          backdropFilter: 'blur(1px)'
+        }}
         onClick={(e) => {
           if (e.target === e.currentTarget) {
             closeSettings();
@@ -274,7 +295,15 @@ const SettingsModal: React.FC = () => {
       />
 
       {/* Modal panel */}
-      <div className="relative z-[1100] bg-white dark:bg-slate-900 shadow-2xl ring-1 ring-black/5 border border-slate-200/60 dark:border-slate-700/60 rounded-xl w-[min(900px,calc(100vw-2rem))] max-h-[85vh] flex flex-col overflow-hidden">
+      <div 
+        className="relative bg-white dark:bg-slate-900 shadow-2xl ring-1 ring-black/5 border border-slate-200/60 dark:border-slate-700/60 rounded-xl flex flex-col overflow-hidden"
+        style={{
+          position: 'relative',
+          zIndex: 1100,
+          width: 'min(900px, calc(100vw - 2rem))',
+          maxHeight: '85vh'
+        }}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
           <h2 id="settings-modal-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">
