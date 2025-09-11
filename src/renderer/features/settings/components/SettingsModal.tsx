@@ -113,10 +113,8 @@ const ProviderBlock: React.FC<{
   };
 
   const handleTest = async () => {
-    // Call store's test function to reflect "testing" (Phase 1 behavior)
     testConnection(provider);
     try {
-      // Wait for mock to clear its 800ms reset, then set our own success/error
       const cfgLatest = ensureConfig(useSettingsStore.getState().providers[provider]);
       const [result] = await Promise.all([
         runHookTest(provider, cfgLatest),
@@ -164,12 +162,22 @@ const ProviderBlock: React.FC<{
 };
 
 const SettingsModal: React.FC = () => {
+  console.log('[SettingsModal] Component rendering');
+  
   const { closeSettings, activeTab, setActiveTab, saveSettings, providers, isSettingsOpen, loadSettings } = useSettingsStore();
   const { configureProviders } = useAPIConfiguration();
 
+  // Enhanced debugging
+  console.log('[SettingsModal] isSettingsOpen:', isSettingsOpen);
+  console.log('[SettingsModal] Full store state:', useSettingsStore.getState());
+
   useEffect(() => {
+    console.log('[SettingsModal] isSettingsOpen changed to:', isSettingsOpen);
     if (isSettingsOpen) {
+      console.log('[SettingsModal] Modal should be visible now');
       loadSettings();
+    } else {
+      console.log('[SettingsModal] Modal should be hidden now');
     }
   }, [isSettingsOpen, loadSettings]);
 
@@ -199,9 +207,7 @@ const SettingsModal: React.FC = () => {
   // Debounced auto-save and configure (600ms)
   useEffect(() => {
     const timer = setTimeout(async () => {
-      // Save in-memory settings (placeholder)
       await saveSettings();
-      // Build eligible provider map for configuration (enabled, key present, and no API/model errors)
       const eligible: ProvidersConfigMap = {};
       for (const name of PROVIDERS) {
         const cfg = ensureConfig(providers[name]);
@@ -218,15 +224,12 @@ const SettingsModal: React.FC = () => {
   // Lock background scroll while the modal is open
   useEffect(() => {
     if (!isSettingsOpen) return;
+    console.log('[SettingsModal] Adding overflow-hidden to body');
     document.body.classList.add('overflow-hidden');
     return () => {
+      console.log('[SettingsModal] Removing overflow-hidden from body');
       document.body.classList.remove('overflow-hidden');
     };
-  }, [isSettingsOpen]);
-
-  // Debug open/close transitions
-  useEffect(() => {
-    console.debug('[SettingsModal]', isSettingsOpen ? 'open' : 'closed');
   }, [isSettingsOpen]);
 
   // Close on Escape (only while open)
@@ -234,6 +237,7 @@ const SettingsModal: React.FC = () => {
     if (!isSettingsOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        console.log('[SettingsModal] Escape key pressed, closing modal');
         closeSettings();
       }
     };
@@ -244,6 +248,7 @@ const SettingsModal: React.FC = () => {
   }, [isSettingsOpen, closeSettings]);
 
   const handleSave = async () => {
+    console.log('[SettingsModal] Save button clicked');
     const success = await saveSettings();
     if (success) {
       const eligible: ProvidersConfigMap = {};
@@ -261,20 +266,56 @@ const SettingsModal: React.FC = () => {
     }
   };
 
+  // Early return check with enhanced logging
   if (!isSettingsOpen) {
+    console.log('[SettingsModal] Early return - modal not open');
     return null;
   }
-  return createPortal(
+
+  console.log('[SettingsModal] Rendering modal with createPortal');
+  
+  // Debug createPortal target
+  console.log('[SettingsModal] document.body exists:', !!document.body);
+  console.log('[SettingsModal] document.body children before portal:', document.body.children.length);
+
+  const modalContent = (
     <div
       className="fixed inset-0 z-[1000] flex items-center justify-center"
       role="dialog"
       aria-modal="true"
       aria-labelledby="settings-modal-title"
+      style={{ 
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        backdropFilter: 'blur(1px)',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 1000
+      }}
     >
+      {/* Debug overlay */}
+      <div 
+        style={{
+          position: 'absolute',
+          top: '10px',
+          left: '10px',
+          backgroundColor: 'red',
+          color: 'white',
+          padding: '10px',
+          zIndex: 2000,
+          fontSize: '12px'
+        }}
+      >
+        DEBUG: Modal is rendering! isSettingsOpen: {String(isSettingsOpen)}
+      </div>
+
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-[1px]"
         onClick={(e) => {
+          console.log('[SettingsModal] Backdrop clicked');
           if (e.target === e.currentTarget) {
             closeSettings();
           }
@@ -290,7 +331,10 @@ const SettingsModal: React.FC = () => {
           </h2>
           <button
             type="button"
-            onClick={closeSettings}
+            onClick={() => {
+              console.log('[SettingsModal] Close X button clicked');
+              closeSettings();
+            }}
             aria-label="Close settings"
             className="text-gray-500 hover:text-gray-700 focus:outline-none"
             title="Close"
@@ -368,7 +412,10 @@ const SettingsModal: React.FC = () => {
         <div className="px-4 py-3 border-t border-gray-200 flex justify-end gap-2">
           <button
             type="button"
-            onClick={closeSettings}
+            onClick={() => {
+              console.log('[SettingsModal] Cancel button clicked');
+              closeSettings();
+            }}
             className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             Cancel
@@ -382,9 +429,12 @@ const SettingsModal: React.FC = () => {
           </button>
         </div>
       </div>
-    </div>,
-    document.body
+    </div>
   );
+
+  console.log('[SettingsModal] About to call createPortal');
+  
+  return createPortal(modalContent, document.body);
 };
 
 export default SettingsModal;

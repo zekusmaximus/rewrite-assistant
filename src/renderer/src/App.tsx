@@ -11,6 +11,7 @@ import RewritePanel from '../features/rewrite/components/RewritePanel';
 import { useSettingsStore } from '../features/settings/stores/useSettingsStore';
 import { SettingsModal } from '../features/settings/components';
 import ExportDialog from '../features/export/components/ExportDialog';
+import SettingsDebugPanel from '../components/SettingsDebugPanel';
  
 const App: React.FC = () => {
   const { 
@@ -173,6 +174,7 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
+      <SettingsDebugPanel />
       {/* Header */}
       <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
