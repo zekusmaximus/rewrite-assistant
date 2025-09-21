@@ -78,7 +78,10 @@ describe('RewriteStats', () => {
 
     // Scenes moved card shows 1/2
     expect(screen.getByText('Scenes Moved')).toBeInTheDocument();
-    expect(screen.getByText('1/2')).toBeInTheDocument();
+    // Find the Scenes Moved card and check its value contains 1/2
+    const scenesMovedCard = screen.getByText('Scenes Moved').closest('.p-4');
+    const statValue = scenesMovedCard?.querySelector('.text-2xl');
+    expect(statValue?.textContent?.replace(/\s+/g, '')).toBe('1/2');
 
     // Rewrites ready card shows 1/1 (rewrittenScenes/applied?) — rewrittenScenes is based on sceneRewrites map size
     expect(screen.getByText('Rewrites Ready')).toBeInTheDocument();

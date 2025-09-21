@@ -105,35 +105,54 @@ describe('ExportDialog', () => {
 
   it('invokes IPC on Export and closes on success', async () => {
     const onClose = vi.fn();
-    (window as any).electron.ipcRenderer.invoke = vi.fn().mockResolvedValue({
+    const mockInvoke = vi.fn().mockResolvedValue({
       success: true,
       filePath: 'C:/tmp/export.txt'
     });
+    (window as any).electron.ipcRenderer.invoke = mockInvoke;
 
     render(<ExportDialog isOpen={true} onClose={onClose} />);
 
     fireEvent.click(screen.getByText('Export'));
 
-    // Wait microtask
-    await Promise.resolve();
+    // Wait for the async operation to complete
+    await new Promise(resolve => setTimeout(resolve, 0));
 
-    expect((window as any).electron.ipcRenderer.invoke).toHaveBeenCalled();
+    expect(mockInvoke).toHaveBeenCalledWith(
+      'file:export_with_rewrites',
+      expect.objectContaining({
+        manuscript: expect.any(Object),
+        rewrites: expect.any(Object),
+        options: expect.any(Object)
+      })
+    );
     expect(onClose).toHaveBeenCalled();
   });
 
   it('shows error when export fails', async () => {
     const onClose = vi.fn();
-    (window as any).electron.ipcRenderer.invoke = vi.fn().mockResolvedValue({
+    const mockInvoke = vi.fn().mockResolvedValue({
       success: false,
       canceled: false,
       error: 'Export failed'
     });
+    (window as any).electron.ipcRenderer.invoke = mockInvoke;
 
     render(<ExportDialog isOpen={true} onClose={onClose} />);
 
     fireEvent.click(screen.getByText('Export'));
-    await Promise.resolve();
 
+    // Wait for the async operation and state update to complete
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      'file:export_with_rewrites',
+      expect.objectContaining({
+        manuscript: expect.any(Object),
+        rewrites: expect.any(Object),
+        options: expect.any(Object)
+      })
+    );
     expect(screen.getByText('Export failed')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });

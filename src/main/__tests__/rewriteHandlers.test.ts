@@ -41,6 +41,12 @@ vi.mock('electron', () => {
       on: vi.fn(),
       off: vi.fn(),
       quit: vi.fn(),
+      getPath: (name: string) => {
+        if (name === 'userData') {
+          return '/tmp/test-user-data';
+        }
+        return '';
+      },
     },
     ipcMain: {
       handle: vi.fn((channel: string, fn: (...args: unknown[]) => unknown) => {
@@ -69,20 +75,31 @@ vi.mock('../../main/index', () => {
 
 // Mock SceneRewriter used by the GENERATE_REWRITE handler
 vi.mock('../../services/rewrite/SceneRewriter', () => {
+  const mockRewriteScene = async (request: any) => {
+    console.log('[Mock] rewriteScene called with:', request);
+    return {
+      success: true,
+      rewrittenText: 'rewritten text',
+      issuesAddressed: [],
+      changesExplanation: 'mocked explanation',
+      preservedElements: [],
+      diffData: [],
+      modelUsed: 'mock-model',
+    };
+  };
+
+  // Mock the class constructor - needs to be a function that can be called with 'new'
+  function MockSceneRewriter() {
+    return {
+      rewriteScene: mockRewriteScene,
+    };
+  }
+
+  // Set up the prototype to make it look like a class
+  MockSceneRewriter.prototype = Object.create(Function.prototype);
+
   return {
-    default: vi.fn().mockImplementation(() => {
-      return {
-        rewriteScene: vi.fn().mockResolvedValue({
-          success: true,
-          rewrittenText: 'rewritten text',
-          issuesAddressed: [],
-          changesExplanation: 'mocked explanation',
-          preservedElements: [],
-          diffData: [],
-          modelUsed: 'mock-model',
-        }),
-      };
-    }),
+    default: MockSceneRewriter,
   };
 });
 
