@@ -27,6 +27,15 @@ export interface Scene {
   // Optional rewrite history metadata
   rewriteHistory?: RewriteVersion[];
   lastRewriteTimestamp?: number;
+
+  // Global coherence context for scene placement
+  globalCoherenceContext?: {
+    transitionQualityBefore?: number; // From previous scene
+    transitionQualityAfter?: number; // To next scene
+    sequenceFlowScore?: number;
+    chapterPosition?: 'opening' | 'middle' | 'closing';
+    narrativeFunction?: 'setup' | 'conflict' | 'revelation' | 'resolution';
+  };
 }
 
 // Issues when scenes move
@@ -37,6 +46,8 @@ export interface ContinuityIssue {
   textSpan: [start: number, end: number];
   suggestedFix?: string;
 }
+
+export type IssueSeverity = ContinuityIssue['severity'];
 
 /**
 * Reader knowledge and continuity analysis types
@@ -185,6 +196,175 @@ export interface RewriteVersion {
   modelUsed: string;
   userEdited: boolean;
   appliedToManuscript: boolean;
+}
+
+// Global Coherence Analysis Types
+export interface GlobalCoherenceAnalysis {
+  // Three-tier analysis structure
+  sceneLevel: ScenePairAnalysis[];      // Adjacent scene transitions
+  chapterLevel: ChapterFlowAnalysis[];   // Chapter-by-chapter coherence
+  manuscriptLevel: ManuscriptAnalysis;   // Full narrative arc
+  
+  // Aggregated findings mapped to scenes
+  flowIssues: NarrativeFlowIssue[];
+  pacingProblems: PacingIssue[];
+  thematicBreaks: ThematicDiscontinuity[];
+  characterArcDisruptions: CharacterArcIssue[];
+  
+  // Metadata
+  timestamp: number;
+  totalAnalysisTime: number;
+  modelsUsed: Record<string, string>; // passType -> model
+  settings: GlobalCoherenceSettings;
+}
+
+export interface ScenePairAnalysis {
+  sceneAId: string;
+  sceneBId: string;
+  position: number; // Position in manuscript
+  transitionScore: number; // 0.0-1.0
+  
+  issues: {
+    type: 'jarring_pace_change' | 'emotional_whiplash' | 'time_gap' | 'location_jump' | 'unresolved_tension';
+    severity: IssueSeverity;
+    description: string;
+    suggestion: string;
+  }[];
+  
+  strengths: string[];
+  flags: {
+    needsSceneBreak: boolean;
+    needsTransitionScene: boolean;
+    chapterBoundaryCandidate: boolean;
+  };
+}
+
+export interface ChapterFlowAnalysis {
+  chapterNumber: number;
+  sceneIds: string[];
+  coherenceScore: number; // 0.0-1.0
+  
+  issues: {
+    unity: boolean;
+    completeness: boolean;
+    balancedPacing: boolean;
+    narrativePurpose: boolean;
+  };
+  
+  recommendations: {
+    shouldSplit: boolean;
+    shouldMergeWithNext: boolean;
+    orphanedScenes: string[];
+    missingElements: string[];
+  };
+  
+  pacingProfile: {
+    frontLoaded: boolean;
+    saggyMiddle: boolean;
+    rushedEnding: boolean;
+  };
+}
+
+export interface ManuscriptAnalysis {
+  structuralIntegrity: number; // 0.0-1.0
+  actBalance: [number, number, number]; // Percentage per act
+  
+  characterArcs: Map<string, {
+    completeness: number;
+    consistency: number;
+    issues: string[];
+  }>;
+  
+  plotHoles: string[];
+  unresolvedElements: string[];
+  
+  pacingCurve: {
+    slowSpots: Array<{ startScene: string; endScene: string; reason: string }>;
+    rushedSections: Array<{ startScene: string; endScene: string; reason: string }>;
+  };
+  
+  thematicCoherence: number; // 0.0-1.0
+  openingEffectiveness: number; // 0.0-1.0
+  endingSatisfaction: number; // 0.0-1.0
+}
+
+export interface NarrativeFlowIssue extends Omit<ContinuityIssue, 'type'> {
+  type: 'flow';
+  affectedScenes: string[]; // Multiple scenes impacted
+  pattern: 'broken_causality' | 'passive_sequence' | 'info_dump' | 'info_gap';
+}
+
+export interface PacingIssue extends Omit<ContinuityIssue, 'type'> {
+  type: 'pacing';
+  affectedScenes: string[];
+  pattern: 'too_slow' | 'too_fast' | 'inconsistent';
+  tensionDelta: number; // Change in tension level
+}
+
+export interface ThematicDiscontinuity extends Omit<ContinuityIssue, 'type'> {
+  type: 'theme';
+  theme: string;
+  lastSeenScene: string;
+  brokenAtScene: string;
+}
+
+export interface CharacterArcIssue extends Omit<ContinuityIssue, 'type'> {
+  type: 'character_arc';
+  characterName: string;
+  arcType: 'incomplete' | 'inconsistent' | 'regressed';
+  affectedScenes: string[];
+}
+
+export interface GlobalCoherenceSettings {
+  // Pass selection
+  enableTransitions: boolean;
+  enableSequences: boolean;
+  enableChapters: boolean;
+  enableArc: boolean;
+  enableSynthesis: boolean;
+  
+  // Analysis depth
+  depth: 'quick' | 'standard' | 'thorough';
+  
+  // Cost control
+  maxCost?: number;
+  stopOnCritical?: boolean;
+  
+  // Model overrides (optional)
+  modelOverrides?: Partial<Record<string, string>>;
+}
+
+export interface GlobalCoherenceProgress {
+  currentPass: 'transitions' | 'sequences' | 'chapters' | 'arc' | 'synthesis';
+  passNumber: number;
+  totalPasses: number;
+  passProgress: number; // 0-100
+  
+  currentScene?: string;
+  scenesAnalyzed: number;
+  totalScenes: number;
+  
+  partialResults?: Partial<GlobalCoherenceAnalysis>;
+  estimatedTimeRemaining: number; // seconds
+  
+  errors: Array<{ pass: string; error: string }>;
+  cancelled: boolean;
+}
+
+export interface CompressedScene {
+  id: string;
+  position: number;
+  opening: string; // First 200 words
+  closing: string; // Last 200 words
+  summary: string; // AI-generated 150-word summary
+  
+  metadata: {
+    wordCount: number;
+    characters: string[];
+    locations: string[];
+    emotionalTone: string;
+    tensionLevel: number; // 1-10
+  };
 }
 
 export interface DiffSegment {
