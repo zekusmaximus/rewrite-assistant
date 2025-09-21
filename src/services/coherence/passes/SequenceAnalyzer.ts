@@ -8,7 +8,7 @@ import type {
   ContinuityIssue,
   ReaderKnowledge
 } from '../../../shared/types';
-import type { AnalysisRequest, AnalysisResponse } from '../../ai/types';
+import type { AnalysisResponse } from '../../ai/types';
 import AIServiceManager from '../../ai/AIServiceManager';
 
 export interface SequenceResults {
@@ -143,18 +143,18 @@ export class SequenceAnalyzer {
       const readerContext = this.buildReaderContext(window);
 
       // Use 'consistency' type for narrative flow analysis
-      const request: AnalysisRequest = {
+      const request = {
         scene: targetScene,
-        previousScenes: window.slice(0, -1).map(cs => 
+        previousScenes: window.slice(0, -1).map(cs =>
           sceneIndex.get(cs.id) || this.createPlaceholderScene(cs)
         ),
         analysisType: 'consistency',
         readerContext,
         options: {
           focusAreas: ['sequence-flow', 'pacing', 'themes'],
-          modelOverride: 'claude-sonnet-4' // Better for narrative understanding
+          modelOverride: 'claude-sonnet-4'
         }
-      };
+      } as any;
 
       const response = await this.aiManager.analyzeContinuity(request);
       this.modelsUsed.set(window.map(s => s.id).join('-'), response.metadata?.modelUsed || 'unknown');
@@ -407,24 +407,41 @@ Return a JSON object with:
    * Consolidate and deduplicate results across windows
    */
   private consolidateResults(results: SequenceResults): SequenceResults {
-    // Simple deduplication based on description and affected scenes
-    const seen = new Set<string>();
-    
-    const dedupe = <T extends { description: string; affectedScenes: string[] }>(
-      items: T[]
-    ): T[] => {
+    const seenFlow = new Set<string>();
+    const seenPacing = new Set<string>();
+    const seenTheme = new Set<string>();
+  
+    const dedupeFlow = (items: NarrativeFlowIssue[]): NarrativeFlowIssue[] => {
       return items.filter(item => {
-        const key = `${item.description}:${item.affectedScenes.sort().join(',')}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
+        const key = `${item.description}:${[...item.affectedScenes].sort().join(',')}:${item.pattern}`;
+        if (seenFlow.has(key)) return false;
+        seenFlow.add(key);
         return true;
       });
     };
-
+  
+    const dedupePacing = (items: PacingIssue[]): PacingIssue[] => {
+      return items.filter(item => {
+        const key = `${item.description}:${[...item.affectedScenes].sort().join(',')}:${item.pattern}:${item.tensionDelta}`;
+        if (seenPacing.has(key)) return false;
+        seenPacing.add(key);
+        return true;
+      });
+    };
+  
+    const dedupeTheme = (items: ThematicDiscontinuity[]): ThematicDiscontinuity[] => {
+      return items.filter(item => {
+        const key = `${item.description}:${item.theme}:${item.lastSeenScene}:${item.brokenAtScene}`;
+        if (seenTheme.has(key)) return false;
+        seenTheme.add(key);
+        return true;
+      });
+    };
+  
     return {
-      flow: dedupe(results.flow),
-      pacing: dedupe(results.pacing),
-      theme: dedupe(results.theme)
+      flow: dedupeFlow(results.flow),
+      pacing: dedupePacing(results.pacing),
+      theme: dedupeTheme(results.theme)
     };
   }
 
@@ -433,18 +450,24 @@ Return a JSON object with:
    */
   private buildReaderContext(window: CompressedScene[]): ReaderKnowledge {
     const characters = new Set<string>();
-    const locations: string[] = [];
-    
+    const establishedSettings: { name: string }[] = [];
+    const seenLocations = new Set<string>();
+  
     for (const scene of window) {
-      scene.metadata.characters.forEach(c => characters.add(c));
-      locations.push(...scene.metadata.locations);
+      (scene.metadata.characters ?? []).forEach(c => { if (c) characters.add(c); });
+      for (const loc of (scene.metadata.locations ?? [])) {
+        if (loc && !seenLocations.has(loc)) {
+          establishedSettings.push({ name: loc });
+          seenLocations.add(loc);
+        }
+      }
     }
-
+  
     return {
-      knownCharacters: Array.from(characters),
+      knownCharacters: characters,
       establishedTimeline: [],
       revealedPlotPoints: [],
-      establishedSettings: locations
+      establishedSettings
     };
   }
 
@@ -461,7 +484,8 @@ Return a JSON object with:
       characters: compressed.metadata.characters,
       timeMarkers: [],
       locationMarkers: compressed.metadata.locations,
-      hasBeenMoved: false
+      hasBeenMoved: false,
+      rewriteStatus: 'pending'
     };
   }
 

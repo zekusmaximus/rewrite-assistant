@@ -23,6 +23,10 @@ import AnalysisCache from '../cache/AnalysisCache';
 // Wildcard import to be resilient to either default or named export for ManuscriptCompressor
 import * as ManuscriptCompressorModule from './ManuscriptCompressor';
 import { TransitionAnalyzer } from './passes/TransitionAnalyzer';
+import { SequenceAnalyzer } from './passes/SequenceAnalyzer';
+import { ChapterAnalyzer } from './passes/ChapterAnalyzer';
+import { ArcValidator } from './passes/ArcValidator';
+import { SynthesisEngine } from './passes/SynthesisEngine';
 
 export type ProgressCallback = (progress: GlobalCoherenceProgress) => void;
 
@@ -63,11 +67,19 @@ export class GlobalAnalysisOrchestrator {
   private delayBetweenItemsMs = 0;
   private modelsUsed: Record<string, string> = {};
   private transitionAnalyzer: TransitionAnalyzer;
+  private sequenceAnalyzer: SequenceAnalyzer;
+  private chapterAnalyzer: ChapterAnalyzer;
+  private arcValidator: ArcValidator;
+  private synthesisEngine: SynthesisEngine;
 
   constructor(aiManager?: AIServiceManager, options?: { enableCache?: boolean; delayBetweenItemsMs?: number }) {
     this.ai = aiManager ?? new AIServiceManager();
     this.compressor = instantiateCompressor(this.ai);
     this.transitionAnalyzer = new TransitionAnalyzer(this.ai);
+    this.sequenceAnalyzer = new SequenceAnalyzer(this.ai);
+    this.chapterAnalyzer = new ChapterAnalyzer(this.ai);
+    this.arcValidator = new ArcValidator(this.ai);
+    this.synthesisEngine = new SynthesisEngine(this.ai);
     if (options?.enableCache) {
       this.cache = new AnalysisCache();
     }
@@ -306,7 +318,11 @@ export class GlobalAnalysisOrchestrator {
    */
   cancelAnalysis(): void {
     this.cancelled = true;
-    this.transitionAnalyzer.cancel();
+    this.transitionAnalyzer?.cancel();
+    this.sequenceAnalyzer?.cancel();
+    this.chapterAnalyzer?.cancel();
+    this.arcValidator?.cancel();
+    this.synthesisEngine?.cancel();
   }
 
   /**
@@ -352,96 +368,7 @@ export class GlobalAnalysisOrchestrator {
     sceneIndex: Map<string, Scene>,
     onProgress: (percent: number, currentSceneId?: string) => void
   ): Promise<SequenceResults> {
-    const k = 3; // window size
-    const totalWindows = Math.max(0, compressed.length - (k - 1));
-    const flow: NarrativeFlowIssue[] = [];
-    const pacing: PacingIssue[] = [];
-    const theme: ThematicDiscontinuity[] = [];
-
-    if (totalWindows === 0) {
-      onProgress(100);
-      return { flow, pacing, theme };
-    }
-
-    for (let endIdx = k - 1; endIdx < compressed.length; endIdx++) {
-      if (this.cancelled) break;
-
-      const startIdx = endIdx - (k - 1);
-      const windowCompressed = compressed.slice(startIdx, endIdx + 1);
-      const lastId = windowCompressed[windowCompressed.length - 1].id;
-      const windowScenes: Scene[] = windowCompressed
-        .map(c => sceneIndex.get(c.id))
-        .filter(Boolean) as Scene[];
-
-      if (windowScenes.length < k) {
-        console.debug('[GlobalAnalysisOrchestrator] Incomplete window for sequence analysis at endIdx', endIdx);
-        continue;
-      }
-
-      const target = windowScenes[windowScenes.length - 1];
-      const prev = windowScenes.slice(0, -1);
-      const reader = this.buildReaderContextFromCompressed(
-        compressed.slice(0, endIdx)
-      );
-
-      try {
-        const res = await this.ai.analyzeContinuity({
-          scene: target,
-          previousScenes: prev,
-          analysisType: 'complex',
-          readerContext: reader,
-        } as any);
-
-        this.modelsUsed['sequences'] = res.metadata.modelUsed ?? this.modelsUsed['sequences'];
-
-        // Heuristic mapping: timeline/plot issues => flow; large tension deltas => pacing; context => theme
-        for (const iss of res.issues as ContinuityIssue[]) {
-          if (iss.type === 'timeline' || iss.type === 'plot') {
-            flow.push({
-              type: 'flow',
-              severity: iss.severity,
-              description: iss.description,
-              textSpan: iss.textSpan,
-              affectedScenes: windowScenes.map(s => s.id),
-              pattern: iss.type === 'timeline' ? 'broken_causality' : 'info_gap',
-            });
-          } else if (iss.type === 'engagement') {
-            pacing.push({
-              type: 'pacing',
-              severity: iss.severity,
-              description: iss.description,
-              textSpan: iss.textSpan,
-              affectedScenes: windowScenes.map(s => s.id),
-              pattern: 'inconsistent',
-              tensionDelta: 0,
-            });
-          } else if (iss.type === 'context') {
-            theme.push({
-              type: 'theme',
-              severity: iss.severity,
-              description: iss.description,
-              textSpan: iss.textSpan,
-              theme: 'contextual',
-              lastSeenScene: windowScenes[0].id,
-              brokenAtScene: target.id,
-            });
-          }
-        }
-      } catch (err) {
-        console.debug('[GlobalAnalysisOrchestrator] Sequence AI failed for window ending at', target.id, err);
-        // Graceful degradation: continue without adding issues
-      }
-
-      const processed = endIdx - (k - 2);
-      const percent = Math.floor((processed / totalWindows) * 100);
-      onProgress(percent, lastId);
-
-      if (this.delayBetweenItemsMs > 0 && processed < totalWindows) {
-        await this.delay(this.delayBetweenItemsMs);
-      }
-    }
-
-    return { flow, pacing, theme };
+    return this.sequenceAnalyzer.analyzeSequences(compressed, scenes, sceneIndex, onProgress);
   }
 
   private async executeChapterPass(
@@ -449,81 +376,16 @@ export class GlobalAnalysisOrchestrator {
     compressed: CompressedScene[],
     onProgress: (percent: number) => void
   ): Promise<ChapterFlowAnalysis[]> {
-    // Use skeleton to get chapter groupings if available
-    const skeleton = await this.compressor.createManuscriptSkeleton(manuscript);
-    const chapters = Array.isArray(skeleton?.chapters) ? skeleton.chapters : [];
-    const total = Math.max(1, chapters.length || Math.ceil(manuscript.scenes.length / 5));
-    const results: ChapterFlowAnalysis[] = [];
-
-    if (!chapters.length) {
-      // Fallback: naive grouping by 5 scenes
-      const ids = manuscript.currentOrder ?? manuscript.scenes.map(s => s.id);
-      for (let i = 0, ch = 1; i < ids.length; i += 5, ch++) {
-        const group = ids.slice(i, i + 5);
-        results.push(this.buildDefaultChapterAnalysis(ch, group));
-        const percent = Math.min(100, Math.floor(((ch) / total) * 100));
-        onProgress(percent);
-      }
-      return results;
-    }
-
-    for (let i = 0; i < chapters.length; i++) {
-      if (this.cancelled) break;
-      const ch = chapters[i];
-      const sceneIds: string[] = Array.isArray(ch?.sceneIds) ? ch.sceneIds : [];
-      results.push(this.buildDefaultChapterAnalysis(i + 1, sceneIds));
-      const percent = Math.floor(((i + 1) / total) * 100);
-      onProgress(percent);
-      if (this.delayBetweenItemsMs > 0 && i + 1 < chapters.length) {
-        await this.delay(this.delayBetweenItemsMs);
-      }
-    }
-
-    return results;
+    return this.chapterAnalyzer.analyzeChapters(manuscript, compressed, onProgress);
   }
 
   private async executeArcPass(
     manuscript: Manuscript,
     compressed: CompressedScene[],
     onProgress: (percent: number) => void
-  ): Promise<ManuscriptAnalysis> {
-    // Heuristic synthesis from available data; no AI call to keep costs predictable.
-    // Progress: do a few steps to give feedback.
-    onProgress(10);
-
-    const _chapterCount = Math.max(1, Math.ceil(manuscript.scenes.length / 5));
-    onProgress(40);
-
-    // Placeholder: structural integrity based on density of scenes
-    const structuralIntegrity = Math.min(1, Math.max(0.3, manuscript.scenes.length / 100));
-
-    // Simple act balance heuristic
-    const actSize = Math.max(1, Math.floor(manuscript.scenes.length / 3));
-    const actBalance: [number, number, number] = [
-      Math.min(1, (actSize) / manuscript.scenes.length),
-      Math.min(1, (actSize) / manuscript.scenes.length),
-      Math.min(1, (manuscript.scenes.length - 2 * actSize) / manuscript.scenes.length),
-    ];
-
-    onProgress(70);
-
-    const analysis: ManuscriptAnalysis = {
-      structuralIntegrity,
-      actBalance,
-      characterArcs: new Map(),
-      plotHoles: [],
-      unresolvedElements: [],
-      pacingCurve: {
-        slowSpots: [],
-        rushedSections: [],
-      },
-      thematicCoherence: 0.6,
-      openingEffectiveness: 0.65,
-      endingSatisfaction: 0.7,
-    };
-
-    onProgress(100);
-    return analysis;
+  ): Promise<ManuscriptAnalysis | undefined> {
+    const skeleton = await this.compressor.createManuscriptSkeleton(manuscript);
+    return this.arcValidator.validateArc(skeleton, manuscript, onProgress);
   }
 
   private async executeSynthesisPass(
@@ -534,19 +396,14 @@ export class GlobalAnalysisOrchestrator {
     settings: GlobalCoherenceSettings,
     onProgress: (percent: number) => void
   ): Promise<GlobalCoherenceAnalysis> {
-    onProgress(25);
-
-    const base = this.createBasicAnalysis(sceneLevel, chapterLevel, manuscriptLevel, settings);
-    onProgress(60);
-
-    // Potential additional synthesis/normalization could occur here
-    const result: GlobalCoherenceAnalysis = {
-      ...base,
-      // Fields already populated by createBasicAnalysis
-    };
-
-    onProgress(100);
-    return result;
+    return this.synthesisEngine.synthesizeFindings(
+      sceneLevel,
+      chapterLevel,
+      manuscriptLevel,
+      manuscript,
+      settings,
+      onProgress
+    );
   }
 
   private createBasicAnalysis(
