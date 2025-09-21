@@ -1,4 +1,4 @@
-import type { Scene, ContinuityIssue, ContinuityAnalysis, ReaderKnowledge } from '../../../../shared/types';
+import type { Scene, ContinuityIssue, ContinuityAnalysis, ReaderKnowledge, GlobalCoherenceAnalysis } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
 import AnalysisCache from '../../../../services/cache/AnalysisCache';
 import BaseDetector from '../detectors/BaseDetector';
@@ -40,14 +40,15 @@ export async function runDetectorsSequential(
   scene: Scene,
   previousScenes: readonly Scene[],
   aiManager: AIServiceManager,
-  detectors: readonly DetectorEntry[]
+  detectors: readonly DetectorEntry[],
+  globalContext?: GlobalCoherenceAnalysis
 ): Promise<Map<string, ContinuityIssue[]>> {
   const perDetector = new Map<string, ContinuityIssue[]>();
   const durations: Record<string, number> = {};
   for (const { key, instance } of detectors) {
     const started = Date.now();
     try {
-      const issues = await instance.detect(scene, previousScenes, aiManager);
+      const issues = await instance.detect(scene, previousScenes, aiManager, globalContext);
       perDetector.set(key, Array.isArray(issues) ? issues : []);
       durations[key] = Date.now() - started;
       console.debug(`[ContinuityAnalyzer] ${key} finished in ${durations[key]}ms; ${issues.length} issue(s).`);
@@ -70,7 +71,8 @@ export async function runDetectorsWithLimit(
   previousScenes: readonly Scene[],
   aiManager: AIServiceManager,
   detectors: readonly DetectorEntry[],
-  maxConcurrent = 2
+  maxConcurrent = 2,
+  globalContext?: GlobalCoherenceAnalysis
 ): Promise<Map<string, ContinuityIssue[]>> {
   const perDetector = new Map<string, ContinuityIssue[]>();
   const durations: Record<string, number> = {};
@@ -78,7 +80,7 @@ export async function runDetectorsWithLimit(
   const runOne = async (entry: DetectorEntry) => {
     const started = Date.now();
     try {
-      const issues = await entry.instance.detect(scene, previousScenes, aiManager);
+      const issues = await entry.instance.detect(scene, previousScenes, aiManager, globalContext);
       perDetector.set(entry.key, Array.isArray(issues) ? issues : []);
       durations[entry.key] = Date.now() - started;
       console.debug(`[ContinuityAnalyzer] ${entry.key} finished in ${durations[entry.key]}ms; ${issues.length} issue(s).`);
@@ -162,7 +164,8 @@ export default class ContinuityAnalyzer {
     scene: Scene,
     previousScenes: readonly Scene[] | undefined,
     aiManager: AIServiceManager,
-    options: { readonly includeEngagement: boolean }
+    options: { readonly includeEngagement: boolean },
+    globalContext?: GlobalCoherenceAnalysis
   ): Promise<ContinuityAnalysis> {
     this.ensureValidOptions(options);
     const prev: readonly Scene[] = Array.isArray(previousScenes) ? previousScenes : [];
@@ -206,7 +209,7 @@ export default class ContinuityAnalyzer {
     const detectors = this.getPersistentDetectorList(options.includeEngagement);
     console.debug('[ContinuityAnalyzer] detectors selected:', detectors.map(d => d.key).join(','));
 
-    const perDetector = await runDetectorsSequential(scene, prev, aiManager, detectors);
+    const perDetector = await runDetectorsSequential(scene, prev, aiManager, detectors, globalContext);
     const aggregated = this.aggregator.aggregate(perDetector);
     const totalMs = Date.now() - started;
     const durations = (perDetector as any).__durations as Record<string, number> | undefined;

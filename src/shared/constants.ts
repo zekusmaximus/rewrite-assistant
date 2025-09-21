@@ -43,6 +43,13 @@ export const SUPPORTED_FILE_TYPES = [
    GENERATE_REWRITE: 'rewrite:generate',
    REWRITE_PROGRESS: 'rewrite:progress',
    // Export channels
+    // Global Coherence Analysis
+    GLOBAL_COHERENCE_START: 'global-coherence:start',
+    GLOBAL_COHERENCE_PROGRESS: 'global-coherence:progress',
+    GLOBAL_COHERENCE_COMPLETE: 'global-coherence:complete',
+    GLOBAL_COHERENCE_CANCEL: 'global-coherence:cancel',
+    GLOBAL_COHERENCE_GET_LAST: 'global-coherence:get-last',
+    GLOBAL_COHERENCE_ERROR: 'global-coherence:error',
    EXPORT_WITH_REWRITES: 'file:export_with_rewrites',
    // Settings channels
    SETTINGS_LOAD: 'settings:load',

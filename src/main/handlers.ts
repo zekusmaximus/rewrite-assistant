@@ -10,6 +10,7 @@ import type { AnalysisRequest, AnalysisType, ClaudeConfig, OpenAIConfig, GeminiC
 import AnalysisCache from '../services/cache/AnalysisCache';
 import ManuscriptExporter, { ExportOptions } from '../services/export/ManuscriptExporter';
 import settingsService from './services/SettingsService';
+import { registerGlobalCoherenceHandlers } from './handlers/globalCoherence';
  
 // AI service manager singleton and helpers
 /**
@@ -653,5 +654,7 @@ export function setupIPCHandlers(): void {
     }
   });
   
+  // Global Coherence handlers registration
+  registerGlobalCoherenceHandlers(aiManager, mainWindow);
 }
  

@@ -38,14 +38,24 @@ export interface Scene {
   };
 }
 
-// Issues when scenes move
-export interface ContinuityIssue {
-  type: 'pronoun' | 'timeline' | 'character' | 'plot' | 'context' | 'engagement';
-  severity: 'must-fix' | 'should-fix' | 'consider';
-  description: string;
-  textSpan: [start: number, end: number];
-  suggestedFix?: string;
-}
+ // Issues when scenes move
+ export interface ContinuityIssue {
+   type: 'pronoun' | 'timeline' | 'character' | 'plot' | 'context' | 'engagement';
+   severity: 'must-fix' | 'should-fix' | 'consider';
+   description: string;
+   textSpan: [start: number, end: number];
+   suggestedFix?: string;
+   /**
+    * Optional global coherence annotation when available.
+    * transitionScoreBefore/After are transition-quality scores (0..1) for boundaries adjacent to this scene.
+    * affectsNarrativeFlow indicates this issue correlates with broader flow/pacing/transition concerns.
+    */
+   globalContext?: {
+     transitionScoreBefore?: number;
+     transitionScoreAfter?: number;
+     affectsNarrativeFlow: boolean;
+   };
+ }
 
 export type IssueSeverity = ContinuityIssue['severity'];
 

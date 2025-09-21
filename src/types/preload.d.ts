@@ -1,4 +1,4 @@
-import type { Manuscript } from '../shared/types';
+import type { Manuscript, GlobalCoherenceSettings, GlobalCoherenceAnalysis, GlobalCoherenceProgress } from '../shared/types';
 
 declare global {
   interface Window {
@@ -20,6 +20,16 @@ declare global {
       loadSettings: () => Promise<any>;
       saveSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
       testConnection: (params: any) => Promise<{ success: boolean; error?: string }>;
+
+      // Global coherence analysis bridge
+      globalCoherence: {
+        start(manuscript: Manuscript, settings: GlobalCoherenceSettings): Promise<{ success: boolean; analysisId: string; error?: string }>;
+        cancel(): void;
+        onProgress(cb: (progress: GlobalCoherenceProgress & { analysisId: string }) => void): () => void;
+        onComplete(cb: (data: { analysis: GlobalCoherenceAnalysis; analysisId: string }) => void): () => void;
+        onError(cb: (data: { error: string; analysisId: string }) => void): () => void;
+        getLastAnalysis(): Promise<GlobalCoherenceAnalysis | null>;
+      };
 
       // Env info
       platform: string;

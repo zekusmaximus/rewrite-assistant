@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
-import { Manuscript } from '../shared/types';
+import { Manuscript, GlobalCoherenceSettings, GlobalCoherenceAnalysis, GlobalCoherenceProgress } from '../shared/types';
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
@@ -20,6 +20,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_LOAD),
   saveSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SAVE, settings),
   testConnection: (params: any) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_TEST_CONNECTION, params),
+
+  // Global coherence analysis bridge
+  globalCoherence: {
+    start: (manuscript: Manuscript, settings: GlobalCoherenceSettings): Promise<{ success: boolean; analysisId: string; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GLOBAL_COHERENCE_START, manuscript, settings),
+
+    cancel: (): void => {
+      ipcRenderer.send(IPC_CHANNELS.GLOBAL_COHERENCE_CANCEL);
+    },
+
+    onProgress: (cb: (progress: GlobalCoherenceProgress & { analysisId: string }) => void) => {
+      const listener = (_event: unknown, data: GlobalCoherenceProgress & { analysisId: string }) => cb(data);
+      ipcRenderer.on(IPC_CHANNELS.GLOBAL_COHERENCE_PROGRESS, listener);
+      return () => {
+        ipcRenderer.removeListener(IPC_CHANNELS.GLOBAL_COHERENCE_PROGRESS, listener);
+      };
+    },
+
+    onComplete: (cb: (data: { analysis: GlobalCoherenceAnalysis; analysisId: string }) => void) => {
+      const listener = (_event: unknown, data: { analysis: GlobalCoherenceAnalysis; analysisId: string }) => cb(data);
+      ipcRenderer.on(IPC_CHANNELS.GLOBAL_COHERENCE_COMPLETE, listener);
+      return () => {
+        ipcRenderer.removeListener(IPC_CHANNELS.GLOBAL_COHERENCE_COMPLETE, listener);
+      };
+    },
+
+    onError: (cb: (data: { error: string; analysisId: string }) => void) => {
+      const listener = (_event: unknown, data: { error: string; analysisId: string }) => cb(data);
+      ipcRenderer.on(IPC_CHANNELS.GLOBAL_COHERENCE_ERROR, listener);
+      return () => {
+        ipcRenderer.removeListener(IPC_CHANNELS.GLOBAL_COHERENCE_ERROR, listener);
+      };
+    },
+
+    getLastAnalysis: (): Promise<GlobalCoherenceAnalysis | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GLOBAL_COHERENCE_GET_LAST),
+  },
   
   // Platform info
   platform: process.platform,
@@ -60,7 +97,17 @@ declare global {
      loadSettings: () => Promise<any>;
      saveSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
      testConnection: (params: any) => Promise<{ success: boolean; error?: string }>;
- 
+
+     // Global coherence analysis bridge
+     globalCoherence: {
+       start(manuscript: Manuscript, settings: GlobalCoherenceSettings): Promise<{ success: boolean; analysisId: string; error?: string }>;
+       cancel(): void;
+       onProgress(cb: (progress: GlobalCoherenceProgress & { analysisId: string }) => void): () => void;
+       onComplete(cb: (data: { analysis: GlobalCoherenceAnalysis; analysisId: string }) => void): () => void;
+       onError(cb: (data: { error: string; analysisId: string }) => void): () => void;
+       getLastAnalysis(): Promise<GlobalCoherenceAnalysis | null>;
+     };
+
      // Env info
      platform: string;
      versions: {
