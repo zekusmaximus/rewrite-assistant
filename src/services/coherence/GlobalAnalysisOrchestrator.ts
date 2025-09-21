@@ -22,6 +22,7 @@ import AIServiceManager from '../ai/AIServiceManager';
 import AnalysisCache from '../cache/AnalysisCache';
 // Wildcard import to be resilient to either default or named export for ManuscriptCompressor
 import * as ManuscriptCompressorModule from './ManuscriptCompressor';
+import { TransitionAnalyzer } from './passes/TransitionAnalyzer';
 
 export type ProgressCallback = (progress: GlobalCoherenceProgress) => void;
 
@@ -61,10 +62,12 @@ export class GlobalAnalysisOrchestrator {
   private cancelled = false;
   private delayBetweenItemsMs = 0;
   private modelsUsed: Record<string, string> = {};
+  private transitionAnalyzer: TransitionAnalyzer;
 
   constructor(aiManager?: AIServiceManager, options?: { enableCache?: boolean; delayBetweenItemsMs?: number }) {
     this.ai = aiManager ?? new AIServiceManager();
     this.compressor = instantiateCompressor(this.ai);
+    this.transitionAnalyzer = new TransitionAnalyzer(this.ai);
     if (options?.enableCache) {
       this.cache = new AnalysisCache();
     }
@@ -144,10 +147,8 @@ export class GlobalAnalysisOrchestrator {
       emit(progress);
 
       try {
-        sceneLevel = await this.executeTransitionPass(
+        sceneLevel = await this.transitionAnalyzer.analyzeTransitions(
           compressedScenes,
-          manuscript.scenes,
-          sceneIndex,
           async (p, currentSceneId) => {
             progress.passProgress = p;
             progress.scenesAnalyzed = Math.floor(((compressedScenes.length - 1) * p) / 100);
@@ -156,6 +157,10 @@ export class GlobalAnalysisOrchestrator {
             emit(progress, { sceneLevel });
           }
         );
+        // Record model used for transitions (for reporting consistency)
+        const modelsMap = this.transitionAnalyzer.getModelsUsed();
+        const firstModel = modelsMap.values().next().value;
+        if (firstModel) this.modelsUsed['transitions'] = firstModel;
       } catch (error) {
         console.error('[GlobalAnalysisOrchestrator] Transition pass failed:', error);
         errors.push({ pass: 'transitions', error: String(error) });
@@ -301,6 +306,7 @@ export class GlobalAnalysisOrchestrator {
    */
   cancelAnalysis(): void {
     this.cancelled = true;
+    this.transitionAnalyzer.cancel();
   }
 
   /**
@@ -339,101 +345,6 @@ export class GlobalAnalysisOrchestrator {
 
   // ========== Private helpers ==========
 
-  private async executeTransitionPass(
-    compressed: CompressedScene[],
-    scenes: Scene[],
-    sceneIndex: Map<string, Scene>,
-    onProgress: (percent: number, currentSceneId?: string) => void
-  ): Promise<ScenePairAnalysis[]> {
-    const total = Math.max(0, compressed.length - 1);
-    if (total === 0) {
-      onProgress(100);
-      return [];
-    }
-
-    const results: ScenePairAnalysis[] = [];
-
-    for (let i = 0; i < total; i++) {
-      if (this.cancelled) break;
-
-      const aC = compressed[i];
-      const bC = compressed[i + 1];
-      const a = sceneIndex.get(aC.id);
-      const b = sceneIndex.get(bC.id);
-      if (!a || !b) {
-        console.debug('[GlobalAnalysisOrchestrator] Missing scene in transition window', aC?.id, bC?.id);
-        continue;
-      }
-
-      const reader = this.buildReaderContextFromCompressed(compressed.slice(0, i + 1));
-      let continuity = null as any;
-
-      try {
-        // Try cache first
-        if (this.cache) {
-          continuity = await this.cache.get(b, b.position, [a], reader);
-        }
-
-        if (!continuity) {
-          const res = await this.ai.analyzeContinuity({
-            scene: b,
-            previousScenes: [a],
-            analysisType: 'consistency',
-            readerContext: reader,
-          } as any);
-
-          continuity = {
-            issues: res.issues,
-            timestamp: Date.now(),
-            modelUsed: res.metadata.modelUsed,
-            confidence: res.metadata.confidence ?? 0,
-            readerContext: reader,
-          };
-
-          this.modelsUsed['transitions'] = res.metadata.modelUsed ?? this.modelsUsed['transitions'];
-
-          if (this.cache) {
-            await this.cache.set(b, b.position, [a], reader, continuity, undefined);
-          }
-        }
-      } catch (err) {
-        console.debug('[GlobalAnalysisOrchestrator] Transition AI failed for boundary', a.id, '→', b.id, err);
-        continuity = {
-          issues: [] as ContinuityIssue[],
-          timestamp: Date.now(),
-          modelUsed: 'unknown',
-          confidence: 0,
-          readerContext: reader,
-        };
-      }
-
-      // Translate to ScenePairAnalysis (placeholder mapping)
-      const pair: ScenePairAnalysis = {
-        sceneAId: a.id,
-        sceneBId: b.id,
-        position: b.position,
-        transitionScore: Math.max(0, 1 - (continuity.issues?.length ?? 0) * 0.05),
-        issues: [], // TODO: Map continuity issues to transition-specific categories
-        strengths: [], // TODO: Derive strengths from summaries/tones
-        flags: {
-          needsSceneBreak: false,
-          needsTransitionScene: false,
-          chapterBoundaryCandidate: false,
-        },
-      };
-
-      results.push(pair);
-
-      const percent = Math.floor(((i + 1) / total) * 100);
-      onProgress(percent, b.id);
-
-      if (this.delayBetweenItemsMs > 0 && i + 1 < total) {
-        await this.delay(this.delayBetweenItemsMs);
-      }
-    }
-
-    return results;
-  }
 
   private async executeSequencePass(
     compressed: CompressedScene[],
