@@ -11,6 +11,9 @@ import RewritePanel from '../features/rewrite/components/RewritePanel';
 import { useSettingsStore } from '../features/settings/stores/useSettingsStore';
 import { SettingsModal } from '../features/settings/components';
 import ExportDialog from '../features/export/components/ExportDialog';
+import GlobalCoherencePanel from '../features/coherence/components/GlobalCoherencePanel';
+import GlobalCoherenceProgress from '../features/coherence/components/GlobalCoherenceProgress';
+import { useGlobalCoherenceStore } from '../features/coherence/stores/globalCoherenceStore';
 
  
 const App: React.FC = () => {
@@ -32,6 +35,8 @@ const App: React.FC = () => {
   const [issuesOpen, setIssuesOpen] = useState(false);
   const [rewritePanelOpen, setRewritePanelOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [globalCoherenceOpen, setGlobalCoherenceOpen] = useState(false);
+  const isGlobalAnalyzing = useGlobalCoherenceStore((s) => s.isAnalyzing);
   const sceneViewerRef = useRef<SceneViewerHandle | null>(null);
   const { analyzeMovedScenes } = useAnalysis();
   const { openSettings } = useSettingsStore();
@@ -147,6 +152,33 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [setExportDialogOpen]);
 
+  // Global Coherence panel shortcut: Ctrl/Cmd + G
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Avoid triggering when typing in inputs/textareas/contentEditable or when key repeats
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (event.repeat || target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+          return;
+        }
+      }
+
+      const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+      const key = event.key?.toLowerCase?.() || '';
+      if (isCtrlOrCmd && (key === 'g' || event.code === 'KeyG')) {
+        event.preventDefault();
+        if (!isGlobalAnalyzing) {
+          setGlobalCoherenceOpen(true);
+        }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isGlobalAnalyzing, setGlobalCoherenceOpen]);
+ 
   const handleLoadFile = async () => {
     try {
       setLoading(true);
@@ -257,6 +289,15 @@ const App: React.FC = () => {
                   📤 Export ({getShortcutLabelForExport()})
                 </button>
                 <button
+                  onClick={() => setGlobalCoherenceOpen(true)}
+                  disabled={isGlobalAnalyzing}
+                  aria-busy={isGlobalAnalyzing ? 'true' : 'false'}
+                  className="px-4 py-2 text-sm font-medium text-white bg-purple-600 border border-transparent rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Analyze global narrative coherence across all scenes"
+                >
+                  {isGlobalAnalyzing ? 'Analyzing...' : '🌐 Global Analysis'}
+                </button>
+                <button
                   onClick={async () => {
                     setIssuesOpen(true);
                     await analyzeMovedScenes();
@@ -325,6 +366,23 @@ const App: React.FC = () => {
                 <RewritePanel />
               </div>
             )}
+            {manuscript && globalCoherenceOpen && (
+              <div className="w-96 bg-gray-50 border-l border-gray-200 overflow-hidden flex flex-col">
+                <div className="flex items-center justify-between p-2 border-b border-gray-200">
+                  <div className="text-sm font-semibold text-gray-900">Global Analysis</div>
+                  <button
+                    onClick={() => setGlobalCoherenceOpen(false)}
+                    className="px-2 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    title="Close Global Analysis panel"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="p-2 overflow-auto">
+                  <GlobalCoherencePanel />
+                </div>
+              </div>
+            )}
           </>
         ) : (
           /* Welcome Screen */
@@ -370,6 +428,8 @@ const App: React.FC = () => {
           onClose={() => setExportDialogOpen(false)}
         />
       )}
+      {/* Floating Global Coherence progress indicator */}
+      <GlobalCoherenceProgress />
     </div>
   );
 };

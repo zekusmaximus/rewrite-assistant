@@ -8,10 +8,19 @@ import type {
 
 type Unsub = (() => void) | null;
 
+/**
+ * Dedicated progress view type for the coherence store and UI.
+ * Adds optional overallProgress while preserving the union type for currentPass.
+ */
+export type GlobalCoherenceProgressView = GlobalCoherenceProgress & {
+  /** Optional overall progress percentage (0-100). Prefer provided value over UI-computed fallback. */
+  overallProgress?: number;
+};
+
 interface GlobalCoherenceStore {
   isAnalyzing: boolean;
   analysisId: string | null;
-  progress: GlobalCoherenceProgress | null;
+  progress: GlobalCoherenceProgressView | null;
   lastAnalysis: GlobalCoherenceAnalysis | null;
   error: string | null;
   settings: GlobalCoherenceSettings;
@@ -78,7 +87,7 @@ export const useGlobalCoherenceStore = create<GlobalCoherenceStore>((set, get) =
         return;
       }
       const currentId = get().analysisId ?? (p as any).analysisId ?? null;
-      set({ progress: p as GlobalCoherenceProgress, analysisId: currentId });
+      set({ progress: p as GlobalCoherenceProgressView, analysisId: currentId });
     });
 
     unsubComplete = window.electronAPI.globalCoherence.onComplete(({ analysis }) => {
@@ -87,21 +96,21 @@ export const useGlobalCoherenceStore = create<GlobalCoherenceStore>((set, get) =
     });
 
     unsubError = window.electronAPI.globalCoherence.onError(({ error }) => {
-      set({ error: error ?? 'Analysis failed', isAnalyzing: false, analysisId: null });
+      set({ error: error ?? 'Analysis failed', isAnalyzing: false, analysisId: null, progress: null });
       cleanupSubscriptions();
     });
 
     try {
       const res = await window.electronAPI.globalCoherence.start(manuscript, settings);
       if (!res?.success) {
-        set({ error: res?.error ?? 'Failed to start analysis', isAnalyzing: false, analysisId: null });
+        set({ error: res?.error ?? 'Failed to start analysis', isAnalyzing: false, analysisId: null, progress: null });
         cleanupSubscriptions();
         return;
       }
       set({ analysisId: res.analysisId ?? null });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start analysis';
-      set({ error: message, isAnalyzing: false, analysisId: null });
+      set({ error: message, isAnalyzing: false, analysisId: null, progress: null });
       cleanupSubscriptions();
     }
   },
@@ -113,7 +122,7 @@ export const useGlobalCoherenceStore = create<GlobalCoherenceStore>((set, get) =
     } catch {
       // swallow
     } finally {
-      set({ isAnalyzing: false });
+      set({ isAnalyzing: false, analysisId: null, progress: null });
       cleanupSubscriptions();
     }
   },
