@@ -37,6 +37,13 @@ const App: React.FC = () => {
   const { openSettings } = useSettingsStore();
   const didAutoLoadRef = useRef(false);
 
+  const getShortcutLabelForExport = (): string => {
+    const ua = navigator.userAgent.toLowerCase();
+    const platform = (navigator.platform || '').toLowerCase();
+    const isMac = ua.includes('mac') || platform.includes('mac');
+    return isMac ? '⌘E' : 'Ctrl+E';
+  };
+
   // Auto-load manuscript.txt on startup (once per mount; deps included for lint correctness)
   useEffect(() => {
     if (didAutoLoadRef.current) return;
@@ -113,6 +120,32 @@ const App: React.FC = () => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [analyzeMovedScenes, issuesOpen]);
+
+  // Export dialog shortcut
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Avoid triggering when typing in inputs/textareas/contentEditable
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+          return;
+        }
+      }
+
+      const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+      const key = event.key?.toLowerCase?.() || '';
+      // Ctrl/Cmd + E => Open Export dialog
+      if (isCtrlOrCmd && (key === 'e' || event.code === 'KeyE')) {
+        event.preventDefault();
+        setExportDialogOpen(true);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [setExportDialogOpen]);
 
   const handleLoadFile = async () => {
     try {
@@ -219,9 +252,9 @@ const App: React.FC = () => {
                 <button
                   onClick={() => setExportDialogOpen(true)}
                   className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 border border-transparent rounded-md hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  title="Export manuscript with rewrites"
+                  title={`Export manuscript with rewrites (${getShortcutLabelForExport()})`}
                 >
-                  📤 Export
+                  📤 Export ({getShortcutLabelForExport()})
                 </button>
                 <button
                   onClick={async () => {
