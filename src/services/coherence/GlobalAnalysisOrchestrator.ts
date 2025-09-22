@@ -207,6 +207,11 @@ export class GlobalAnalysisOrchestrator {
         pacingProblems.push(...sequenceResults.pacing);
         thematicBreaks.push(...sequenceResults.theme);
 
+        // Record model used for sequences (choose first if multiple)
+        const seqModels = this.sequenceAnalyzer.getModelsUsed();
+        const seqFirst = seqModels.values().next().value;
+        if (seqFirst) this.modelsUsed['sequences'] = seqFirst;
+
         // Merge hints back into scene-level if helpful
         this.mergeSequenceFindings(sceneLevel, sequenceResults);
         emit(progress, { sceneLevel, flowIssues, pacingProblems, thematicBreaks });
@@ -237,6 +242,13 @@ export class GlobalAnalysisOrchestrator {
             emit(progress, { chapterLevel });
           }
         );
+
+        // Record model used for chapters (choose first if multiple)
+        const chapModels = this.chapterAnalyzer.getModelsUsed?.();
+        if (chapModels && typeof chapModels.values === 'function') {
+          const chapFirst = chapModels.values().next().value;
+          if (chapFirst) this.modelsUsed['chapters'] = chapFirst;
+        }
       } catch (error) {
         console.error('[GlobalAnalysisOrchestrator] Chapter pass failed:', error);
         errors.push({ pass: 'chapters', error: String(error) });
@@ -262,6 +274,10 @@ export class GlobalAnalysisOrchestrator {
             emit(progress);
           }
         );
+
+        // Record model used for arc validation
+        const arcModel = this.arcValidator.getModelUsed?.();
+        if (arcModel) this.modelsUsed['arc'] = arcModel;
       } catch (error) {
         console.error('[GlobalAnalysisOrchestrator] Arc pass failed:', error);
         errors.push({ pass: 'arc', error: String(error) });
@@ -291,6 +307,10 @@ export class GlobalAnalysisOrchestrator {
             emit(progress);
           }
         );
+
+        // Record model used for synthesis
+        const synthModel = this.synthesisEngine.getModelUsed?.();
+        if (synthModel) this.modelsUsed['synthesis'] = synthModel;
       } catch (error) {
         console.error('[GlobalAnalysisOrchestrator] Synthesis pass failed:', error);
         errors.push({ pass: 'synthesis', error: String(error) });
