@@ -1,7 +1,7 @@
 import type { Scene, ContinuityIssue, ReaderKnowledge } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
 import { enrichAnalysisRequest, runAnalysisWithOptionalConsensus } from '../../../../services/ai/consensus/ConsensusAdapter';
-import BaseDetector, { LocalDetectionResult } from './BaseDetector';
+import BaseDetector from './BaseDetector';
 
 // ---------- Types (exported testing hooks) ----------
 export interface SentenceSpan { text: string; start: number; end: number }
@@ -350,94 +350,7 @@ export function assembleTimelineDetectionTargets(
 }
 
 // ---------- Local conflict detection ----------
-function seasonBucketSet(markers: readonly BasicMarker[]): Set<string> {
-  const set = new Set<string>();
-  for (const m of markers) {
-    const low = m.text.toLowerCase();
-    for (const s of SEASONS) if (low.includes(s)) set.add(s === 'autumn' ? 'fall' : s);
-    for (const mon of MONTHS) if (low.includes(mon)) {
-      const sb = monthToSeason(mon); if (sb) set.add(sb);
-    }
-    for (const w of WEATHER_SEASONAL) if (low.includes(w)) {
-      if (['snow','blizzard','sleet','icy','frost','hail'].some(x => low.includes(x))) set.add('winter');
-      if (['heatwave','scorching','sweltering'].some(x => low.includes(x))) set.add('summer');
-    }
-  }
-  return set;
-}
 
-function detectTimelineIssues(
-  markers: readonly BasicMarker[],
-  reg: PreviousTimelineRegistry,
-  _sceneText: string
-): ContinuityIssue[] {
-  const issues: ContinuityIssue[] = [];
-  const lowMarks = markers.map(m => ({ ...m, low: m.text.toLowerCase() }));
-  const hasEarlierToday = lowMarks.some(m => m.low.includes('earlier that day'));
-  const hasNextMorning = lowMarks.some(m => m.low.includes('next morning'));
-  const hasMultiDayJump = lowMarks.some(m => /(\d+)\s+(day|week|month|year)s?\s+(later|after)/.test(m.low));
-  const curSeasons = seasonBucketSet(markers);
-
-  // Hard contradiction: "earlier that day" but previous indicates we're past same-day context
-  if (hasEarlierToday && (reg.lastDayOffset !== null && reg.lastDayOffset > 0)) {
-    const m = lowMarks.find(x => x.low.includes('earlier that day'))!;
-    issues.push({
-      type: 'timeline',
-      severity: 'must-fix',
-      description: 'Temporal rewind: "earlier that day" after prior scenes advanced beyond same-day.',
-      textSpan: [m.start, m.end],
-    });
-  }
-
-  // Likely gap: large jump while recent threads suggest simultaneity
-  if (reg.hasMeanwhile && hasMultiDayJump) {
-    const m = lowMarks.find(x => /(\d+)\s+(day|week|month|year)s?\s+(later|after)/.test(x.low))!;
-    issues.push({
-      type: 'timeline',
-      severity: 'should-fix',
-      description: 'Potential gap: multi-day jump despite ongoing "meanwhile" threads in prior scenes.',
-      textSpan: [m.start, m.end],
-    });
-  }
-
-  // Soft contradiction: "next morning" after cumulative offset suggests longer gap context
-  if (hasNextMorning && (reg.lastDayOffset !== null && reg.lastDayOffset >= 2)) {
-    const m = lowMarks.find(x => x.low.includes('next morning'))!;
-    issues.push({
-      type: 'timeline',
-      severity: 'should-fix',
-      description: 'Possible misalignment: "next morning" but earlier scenes imply a multi-day gap.',
-      textSpan: [m.start, m.end],
-    });
-  }
-
-  // Seasonal inconsistency
-  const prevSeasons = new Set(Array.from(reg.seasons));
-  const winterPrev = prevSeasons.has('winter');
-  const summerPrev = prevSeasons.has('summer');
-  const winterCur = curSeasons.has('winter');
-  const summerCur = curSeasons.has('summer');
-
-  if ((winterPrev && summerCur) || (summerPrev && winterCur)) {
-    const m = lowMarks.find(x => seasonBucketSet([x]).size > 0) ?? lowMarks[0];
-    issues.push({
-      type: 'timeline',
-      severity: 'should-fix',
-      description: 'Seasonal inconsistency: prior scenes indicate different season without transition.',
-      textSpan: [m.start, m.end],
-    });
-  } else if (curSeasons.size && prevSeasons.size && Array.from(curSeasons).some(s => !prevSeasons.has(s))) {
-    const m = lowMarks.find(x => seasonBucketSet([x]).size > 0) ?? lowMarks[0];
-    issues.push({
-      type: 'timeline',
-      severity: 'consider',
-      description: 'Seasonal drift detected; consider adding transition context.',
-      textSpan: [m.start, m.end],
-    });
-  }
-
-  return issues;
-}
 
 // ---------- AI request helpers ----------
 function buildReaderContextMinimal(): ReaderKnowledge {
@@ -520,56 +433,6 @@ function mapAITimelineIssues(
 export default class TimelineDetector extends BaseDetector<TimelineDetectionTarget> {
   public readonly detectorType = 'timeline' as const;
 
-  protected async localDetection(
-    scene: Scene,
-    previousScenes: readonly Scene[],
-    _aiManager: AIServiceManager
-  ): Promise<LocalDetectionResult<TimelineDetectionTarget>> {
-    if (!scene?.text || typeof scene.text !== 'string' || scene.text.trim().length === 0) {
-      return { issues: [], requiresAI: false, targets: [] };
-    }
- 
-    const doc = await this.safeNLP(scene.text);
-    if (!doc) console.debug('[TimelineDetector] compromise not available, using regex-only fallback.');
-    const sentences = splitSentences(scene.text);
-    const extracted = extractTemporalMarkers(scene.text, doc);
-    const basicMarkers = extracted.markers;
-    const reg = getOrBuildRegistry(previousScenes);
- 
-    if (basicMarkers.length === 0 && reg.seasons.size === 0 && reg.months.size === 0 && reg.lastDayOffset === null) {
-      console.debug('[TimelineDetector] Fast path: no markers and empty registry.');
-      return { issues: [], requiresAI: false, targets: [] };
-    }
- 
-    const issues = detectTimelineIssues(basicMarkers, reg, scene.text);
-    const targets = assembleTimelineDetectionTargets(basicMarkers, scene.text, sentences, reg);
- 
-    console.debug(
-      '[TimelineDetector] markers:',
-      basicMarkers.length,
-      'issues:',
-      issues.length,
-      'targets:',
-      targets.length,
-      'reg[lastAnchor,lastDayOffset,seasons,months]:',
-      reg.lastAnchor,
-      reg.lastDayOffset,
-      Array.from(reg.seasons).join(','),
-      Array.from(reg.months).join(',')
-    );
- 
-    return {
-      issues,
-      requiresAI: targets.length > 0,
-      targets,
-      stats: {
-        markers: basicMarkers.length,
-        seasonsCurrent: seasonBucketSet(basicMarkers).size,
-        hasMeanwhilePrev: reg.hasMeanwhile ? 1 : 0,
-        targets: targets.length,
-      },
-    };
-  }
 
   protected async aiDetection(
     scene: Scene,
@@ -577,43 +440,49 @@ export default class TimelineDetector extends BaseDetector<TimelineDetectionTarg
     aiManager: AIServiceManager,
     targets: readonly TimelineDetectionTarget[]
   ): Promise<ContinuityIssue[]> {
-    if (!targets || targets.length === 0) return [];
-    try {
-      const reg = getOrBuildRegistry(previousScenes);
-      const header = buildAIHeader(scene, targets, reg);
-      const excerpt = buildSceneExcerptAroundTargets(scene.text, targets, 1200);
-      const prevExcerpt = previousScenes.length
-        ? [{ ...previousScenes[previousScenes.length - 1], text: (previousScenes[previousScenes.length - 1].text ?? '').slice(0, 700) }]
-        : [];
-
-      const baseReq = {
-        scene: { ...scene, text: `${header}\n\n${excerpt}` },
-        previousScenes: prevExcerpt as Scene[],
-        analysisType: 'consistency' as const,
-        readerContext: buildReaderContextMinimal(),
-      } as Parameters<AIServiceManager['analyzeContinuity']>[0];
-
-      const enriched = enrichAnalysisRequest(baseReq as any, {
-        scene,
-        detectorType: 'timeline',
-        flags: { critical: Boolean((scene as any)?.critical) },
-      });
-
-      console.debug('[TimelineDetector] invoking AI (consistency) for targets:', targets.length);
-      const { issues } = await runAnalysisWithOptionalConsensus(aiManager, enriched as any, {
-        critical: Boolean((enriched as any)?.flags?.critical),
-        consensusCount: 2,
-        acceptThreshold: 0.5,
-        humanReviewThreshold: 0.9,
-        maxModels: 2,
-      });
-
-      const out = mapAITimelineIssues({ issues }, scene.text, targets);
-      console.debug('[TimelineDetector] AI returned timeline issues:', out.length);
-      return out;
-    } catch (err) {
-      console.debug('[TimelineDetector] AI analyzeContinuity failed; degrading to local-only.', err);
-      return [];
+    // Build detection targets on-demand when none provided
+    let effTargets: readonly TimelineDetectionTarget[] = targets ?? [];
+    if (!effTargets.length) {
+      const doc = await this.safeNLP(scene.text);
+      const sentences = splitSentences(scene.text);
+      const extracted = extractTemporalMarkers(scene.text, doc);
+      const basicMarkers = extracted.markers;
+      const regForTargets = getOrBuildRegistry(previousScenes);
+      effTargets = assembleTimelineDetectionTargets(basicMarkers, scene.text, sentences, regForTargets);
     }
+    if (!effTargets.length) return [];
+
+    const reg = getOrBuildRegistry(previousScenes);
+    const header = buildAIHeader(scene, effTargets, reg);
+    const excerpt = buildSceneExcerptAroundTargets(scene.text, effTargets, 1200);
+    const prevExcerpt = previousScenes.length
+      ? [{ ...previousScenes[previousScenes.length - 1], text: (previousScenes[previousScenes.length - 1].text ?? '').slice(0, 700) }]
+      : [];
+
+    const baseReq = {
+      scene: { ...scene, text: `${header}\n\n${excerpt}` },
+      previousScenes: prevExcerpt as Scene[],
+      analysisType: 'consistency' as const,
+      readerContext: buildReaderContextMinimal(),
+    } as Parameters<AIServiceManager['analyzeContinuity']>[0];
+
+    const enriched = enrichAnalysisRequest(baseReq as any, {
+      scene,
+      detectorType: 'timeline',
+      flags: { critical: Boolean((scene as any)?.critical) },
+    });
+
+    console.debug('[TimelineDetector] invoking AI (consistency) for targets:', effTargets.length);
+    const { issues } = await runAnalysisWithOptionalConsensus(aiManager, enriched as any, {
+      critical: Boolean((enriched as any)?.flags?.critical),
+      consensusCount: 2,
+      acceptThreshold: 0.5,
+      humanReviewThreshold: 0.9,
+      maxModels: 2,
+    });
+
+    const out = mapAITimelineIssues({ issues }, scene.text, effTargets);
+    console.debug('[TimelineDetector] AI returned timeline issues:', out.length);
+    return out;
   }
 }

@@ -1,7 +1,7 @@
 import type { Scene, ContinuityIssue, ReaderKnowledge } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
 import { enrichAnalysisRequest, runAnalysisWithOptionalConsensus } from '../../../../services/ai/consensus/ConsensusAdapter';
-import BaseDetector, { LocalDetectionResult } from './BaseDetector';
+import BaseDetector from './BaseDetector';
 
 /**
  * Hybrid pronoun continuity detector:
@@ -318,41 +318,6 @@ export function mapAIResponseToIssues(
 export default class PronounDetector extends BaseDetector<PronounDetectionTarget> {
   public readonly detectorType = 'pronoun' as const;
 
-  protected async localDetection(
-    scene: Scene,
-    previousScenes: readonly Scene[],
-    _aiManager: AIServiceManager
-  ): Promise<LocalDetectionResult<PronounDetectionTarget>> {
-    if (!scene?.text || typeof scene.text !== 'string' || scene.text.trim().length === 0) {
-      return { issues: [], requiresAI: false, targets: [] };
-    }
-
-    const doc = await this.safeNLP(scene.text);
-    const sentences = splitSentences(scene.text);
-    const pronouns = findPronouns(scene.text, sentences);
-    const currentPeople = extractPeopleNames(scene.text, doc);
-    const sig = previousScenesSignature(previousScenes);
-    const previousPeople = getOrBuildPreviousPeople(previousScenes, sig);
-
-    const hints = doc ? collectPronounHints(doc) : [];
-    console.debug('[PronounDetector] pronouns found:', pronouns.length, 'compromise hints:', hints.length);
-
-    const { issues, targets } = analyzeLocalPronouns(
-      scene.text,
-      sentences,
-      pronouns,
-      currentPeople,
-      previousPeople
-    );
-
-    console.debug('[PronounDetector] local issues:', issues.length, 'targets:', targets.length);
-    return {
-      issues,
-      requiresAI: targets.length > 0,
-      targets,
-      stats: { pronouns: pronouns.length },
-    };
-  }
 
   protected async aiDetection(
     scene: Scene,
@@ -360,13 +325,25 @@ export default class PronounDetector extends BaseDetector<PronounDetectionTarget
     aiManager: AIServiceManager,
     targets: readonly PronounDetectionTarget[]
   ): Promise<ContinuityIssue[]> {
-    if (!targets || targets.length === 0) return [];
+    // Build detection targets on-demand when empty
+    let effTargets: readonly PronounDetectionTarget[] = targets ?? [];
+    if (!effTargets.length) {
+      const doc = await this.safeNLP(scene.text);
+      const sentences = splitSentences(scene.text);
+      const pronouns = findPronouns(scene.text, sentences);
+      const currentPeople = extractPeopleNames(scene.text, doc);
+      const sig = previousScenesSignature(previousScenes);
+      const previousPeople = getOrBuildPreviousPeople(previousScenes, sig);
+      const res = analyzeLocalPronouns(scene.text, sentences, pronouns, currentPeople, previousPeople);
+      effTargets = res.targets;
+    }
+    if (!effTargets.length) return [];
 
     const known = assembleKnownPeople(previousScenes, scene.text);
     const prevForAI = previousScenes.slice(-2).map(s => ({ ...s, text: s.text?.slice(0, 600) ?? '' }));
 
-    console.debug('[PronounDetector] invoking AI for targets:', targets.length);
-    const baseReq = buildAIRequest(scene, prevForAI, targets, known);
+    console.debug('[PronounDetector] invoking AI for targets:', effTargets.length);
+    const baseReq = buildAIRequest(scene, prevForAI, effTargets, known);
     const enriched = enrichAnalysisRequest(baseReq as any, {
       scene,
       detectorType: 'pronoun',
@@ -381,21 +358,9 @@ export default class PronounDetector extends BaseDetector<PronounDetectionTarget
       maxModels: 2,
     });
 
-    const out = mapAIResponseToIssues({ issues }, scene.text, targets);
+    const out = mapAIResponseToIssues({ issues }, scene.text, effTargets);
     console.debug('[PronounDetector] AI returned pronoun issues:', out.length);
     return out;
   }
 
-  // Mock-friendly indirection for AI calls
-  protected async aiAnalyzeSimple(
-    aiManager: AIServiceManager,
-    req: Parameters<AIServiceManager['analyzeContinuity']>[0]
-  ) {
-    try {
-      return await aiManager.analyzeContinuity(req);
-    } catch (err) {
-      console.debug('[PronounDetector] AI analyzeContinuity failed; degrading to local-only.', err);
-      return { issues: [], metadata: { modelUsed: 'none', provider: 'openai', costEstimate: 0, durationMs: 0, confidence: 0, cached: false } };
-    }
-  }
 }

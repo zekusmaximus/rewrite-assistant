@@ -1,7 +1,7 @@
 import type { Scene, ContinuityIssue, ReaderKnowledge } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
 import { enrichAnalysisRequest, runAnalysisWithOptionalConsensus } from '../../../../services/ai/consensus/ConsensusAdapter';
-import BaseDetector, { LocalDetectionResult } from './BaseDetector';
+import BaseDetector from './BaseDetector';
 
 /**
  * Character continuity detector (Detector 2 - Phase 2):
@@ -465,102 +465,6 @@ function _assessPronounBeforeNaming(
 export default class CharacterDetector extends BaseDetector<CharacterDetectionTarget> {
   public readonly detectorType = 'character' as const;
 
-  protected async localDetection(
-    scene: Scene,
-    previousScenes: readonly Scene[],
-    _aiManager: AIServiceManager
-  ): Promise<LocalDetectionResult<CharacterDetectionTarget>> {
-    if (!scene?.text || typeof scene.text !== 'string' || scene.text.trim().length === 0) {
-      return { issues: [], requiresAI: false, targets: [] };
-    }
-
-    const doc = await this.safeNLP(scene.text);
-    const sentences = splitSentences(scene.text);
-    const currentNames = compileCurrentNamesWithCompromise(scene.text, doc);
-    const reg = getOrBuildRegistry(previousScenes);
-    const canSet = toLowerSet(reg.canonical);
-    const aliSet = toLowerSet(flattenAliases(reg));
-
-    let unknownFirstMentions = 0;
-    let relTermsFound = 0;
-    const issues: ContinuityIssue[] = [];
-
-    // First-appearance without intro
-    for (const n of currentNames) {
-      const low = n.name.toLowerCase();
-      const known = n.isFull ? canSet.has(low) : aliSet.has(low);
-      if (!known && (n.isFirstOnly || n.nickname) && !n.hasApposition) {
-        unknownFirstMentions++;
-        const sev: ContinuityIssue['severity'] = n.sentenceIndex <= 1 ? 'must-fix' : 'should-fix';
-        issues.push({
-          type: 'character',
-          severity: sev,
-          description: `First mention "${n.name}" appears without introduction/background.`,
-          textSpan: [n.start, n.end],
-        });
-      }
-    }
-
-    // Relationship assumptions
-    for (const sent of sentences) {
-      const terms = detectRelationshipTerms(sent.text);
-      if (!terms.length) continue;
-      const anyNameHere = currentNames.some(n => n.start >= sent.start && n.start < sent.end);
-      if (!anyNameHere) continue;
-      relTermsFound += terms.length;
-      // If no evidence in previous scenes, flag should-fix
-      const nameInSent = currentNames.find(n => n.start >= sent.start && n.start < sent.end)?.name;
-      const supported = nameInSent ? terms.some(t => prevTextContainsRelation(previousScenes, nameInSent, t)) : false;
-      if (!supported) {
-        const t0 = terms[0];
-        const off = sent.text.toLowerCase().indexOf(t0);
-        const begin = off >= 0 ? sent.start + off : sent.start;
-        const end = off >= 0 ? begin + t0.length : Math.min(sent.end, begin + 4);
-        issues.push({
-          type: 'character',
-          severity: 'should-fix',
-          description: `Relationship assumption "${t0}" with ${nameInSent ?? 'a character'} may lack prior support.`,
-          textSpan: [begin, end],
-        });
-      }
-    }
-
-    // Pronouns before naming (approximate)
-    const openingPronouns = findOpeningPronouns(scene.text, sentences, 2);
-    if (openingPronouns.length) {
-      const earliestUnknown = currentNames
-        .filter(n => {
-          const low = n.name.toLowerCase();
-          const known = n.isFull ? canSet.has(low) : aliSet.has(low);
-          return !known;
-        })
-        .sort((a, b) => a.sentenceIndex - b.sentenceIndex)[0];
-      if (earliestUnknown && earliestUnknown.sentenceIndex >= 2) {
-        const p0 = openingPronouns[0];
-        issues.push({
-          type: 'character',
-          severity: 'should-fix',
-          description: `Early pronoun reference precedes first naming of a new character "${earliestUnknown.name}".`,
-          textSpan: [p0.start, p0.end],
-        });
-      }
-    }
-
-    const targets = prepareDetectionTargets(currentNames, scene.text, sentences, reg);
-    console.debug('[CharacterDetector] names:', currentNames.length, 'unknownFirst:', unknownFirstMentions, 'relTerms:', relTermsFound, 'targets:', targets.length);
-
-    return {
-      issues,
-      requiresAI: targets.length > 0,
-      targets,
-      stats: {
-        namesFound: currentNames.length,
-        unknownFirstMentions,
-        relTermsFound,
-        targets: targets.length,
-      },
-    };
-  }
 
   protected async aiDetection(
     scene: Scene,
@@ -568,40 +472,45 @@ export default class CharacterDetector extends BaseDetector<CharacterDetectionTa
     aiManager: AIServiceManager,
     targets: readonly CharacterDetectionTarget[]
   ): Promise<ContinuityIssue[]> {
-    if (!targets || targets.length === 0) return [];
-    try {
+    // Build targets on-demand when not provided
+    let effTargets: readonly CharacterDetectionTarget[] = targets ?? [];
+    if (!effTargets.length) {
+      const doc = await this.safeNLP(scene.text);
+      const sentences = splitSentences(scene.text);
+      const currentNames = compileCurrentNamesWithCompromise(scene.text, doc);
       const reg = getOrBuildRegistry(previousScenes);
-      const header = buildAIHeader(scene, targets, reg);
-      const excerpt = buildSceneExcerpt(scene.text, targets, 1200);
-      const lastPrev = previousScenes.slice(-1).map(s => ({ ...s, text: (s.text ?? '').slice(0, 800) }));
-      const baseReq = {
-        scene: { ...scene, text: `${header}\n\n${excerpt}` },
-        previousScenes: lastPrev as Scene[],
-        analysisType: 'consistency' as const,
-        readerContext: buildReaderContext(registryKnownNames(reg)),
-      } as Parameters<AIServiceManager['analyzeContinuity']>[0];
-
-      const enriched = enrichAnalysisRequest(baseReq as any, {
-        scene,
-        detectorType: 'character',
-        flags: { critical: Boolean((scene as any)?.critical) },
-      });
-
-      console.debug('[CharacterDetector] invoking AI (consistency) for targets:', targets.length);
-      const { issues } = await runAnalysisWithOptionalConsensus(aiManager, enriched as any, {
-        critical: Boolean((enriched as any)?.flags?.critical),
-        consensusCount: 2,
-        acceptThreshold: 0.5,
-        humanReviewThreshold: 0.9,
-        maxModels: 2,
-      });
-
-      const out = mapAICharacterIssues({ issues }, scene.text, targets);
-      console.debug('[CharacterDetector] AI returned character issues:', out.length);
-      return out;
-    } catch (err) {
-      console.debug('[CharacterDetector] AI analyzeContinuity failed; degrading to local-only.', err);
-      return [];
+      effTargets = prepareDetectionTargets(currentNames, scene.text, sentences, reg);
     }
+    if (!effTargets.length) return [];
+
+    const reg = getOrBuildRegistry(previousScenes);
+    const header = buildAIHeader(scene, effTargets, reg);
+    const excerpt = buildSceneExcerpt(scene.text, effTargets, 1200);
+    const lastPrev = previousScenes.slice(-1).map(s => ({ ...s, text: (s.text ?? '').slice(0, 800) }));
+    const baseReq = {
+      scene: { ...scene, text: `${header}\n\n${excerpt}` },
+      previousScenes: lastPrev as Scene[],
+      analysisType: 'consistency' as const,
+      readerContext: buildReaderContext(registryKnownNames(reg)),
+    } as Parameters<AIServiceManager['analyzeContinuity']>[0];
+
+    const enriched = enrichAnalysisRequest(baseReq as any, {
+      scene,
+      detectorType: 'character',
+      flags: { critical: Boolean((scene as any)?.critical) },
+    });
+
+    console.debug('[CharacterDetector] invoking AI (consistency) for targets:', effTargets.length);
+    const { issues } = await runAnalysisWithOptionalConsensus(aiManager, enriched as any, {
+      critical: Boolean((enriched as any)?.flags?.critical),
+      consensusCount: 2,
+      acceptThreshold: 0.5,
+      humanReviewThreshold: 0.9,
+      maxModels: 2,
+    });
+
+    const out = mapAICharacterIssues({ issues }, scene.text, effTargets);
+    console.debug('[CharacterDetector] AI returned character issues:', out.length);
+    return out;
   }
 }

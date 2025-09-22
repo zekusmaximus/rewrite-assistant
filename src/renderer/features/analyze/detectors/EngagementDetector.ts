@@ -1,7 +1,7 @@
 import type { Scene, ContinuityIssue } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
 import { enrichAnalysisRequest, runAnalysisWithOptionalConsensus } from '../../../../services/ai/consensus/ConsensusAdapter';
-import BaseDetector, { LocalDetectionResult } from './BaseDetector';
+import BaseDetector from './BaseDetector';
 
 interface OpeningStats {
   tokenCount150: number;
@@ -194,27 +194,6 @@ function buildAIHeader(scene: Scene, cand: EngagementDetectionTarget): string {
 export default class EngagementDetector extends BaseDetector<EngagementDetectionTarget> {
   public readonly detectorType = 'engagement' as const;
 
-  protected async localDetection(
-    scene: Scene,
-    previousScenes: readonly Scene[],
-    _aiManager: AIServiceManager
-  ): Promise<LocalDetectionResult<EngagementDetectionTarget>> {
-    if (!scene?.text || scene.text.trim().length === 0) {
-      return { issues: [], requiresAI: false, targets: [] };
-    }
-    const doc = await this.safeNLP(scene.text);
-    const sentences = splitSentences(scene.text);
-    const stats = computeOpeningStats(scene.text, sentences, doc);
-    const target = buildEngagementDetectionTarget(scene, previousScenes, stats, sentences);
-    const targets = target.hookLine ? [target] : [];
-    console.debug('[EngagementDetector] stats/target:', { stats, hasTarget: targets.length > 0 });
-    return {
-      issues: [],
-      requiresAI: targets.length > 0,
-      targets,
-      stats: stats as unknown as Record<string, number>
-    };
-  }
 
   protected async aiDetection(
     scene: Scene,
@@ -222,45 +201,50 @@ export default class EngagementDetector extends BaseDetector<EngagementDetection
     aiManager: AIServiceManager,
     targets: readonly EngagementDetectionTarget[]
   ): Promise<ContinuityIssue[]> {
-    if (!targets || targets.length === 0) return [];
-    const cand = targets[0];
-    try {
-      const header = buildAIHeader(scene, cand);
-      const body: string[] = [];
-      body.push('[[First sentences]]');
-      for (const s of cand.firstSentences) body.push(`- ${s}`);
-      body.push('[[Scene context (~900 chars)]]');
-      body.push(cand.contextWindow);
-      const textPayload = `${header}\n\n${body.join('\n')}`;
-      const lastPrev = previousScenes.slice(-1).map(s => ({ ...s, text: (s.text ?? '').slice(0, 600) }));
-      const baseReq = {
-        scene: { ...scene, text: textPayload },
-        previousScenes: lastPrev as Scene[],
-        analysisType: 'full' as const,
-        readerContext: buildReaderContextFromSummary(cand.previousSummary)
-      } as Parameters<AIServiceManager['analyzeContinuity']>[0];
-
-      const enriched = enrichAnalysisRequest(baseReq as any, {
-        scene,
-        detectorType: 'engagement',
-        flags: { critical: Boolean((scene as any)?.critical) },
-      });
-
-      console.debug('[EngagementDetector] invoking AI (full) for detection targets');
-      const { issues } = await runAnalysisWithOptionalConsensus(aiManager, enriched as any, {
-        critical: Boolean((enriched as any)?.flags?.critical),
-        consensusCount: 2,
-        acceptThreshold: 0.5,
-        humanReviewThreshold: 0.9,
-        maxModels: 2,
-      });
-
-      const out = mapAIEngagementIssues({ issues }, scene.text, cand.hookLine);
-      console.debug('[EngagementDetector] AI returned engagement issues:', out.length);
-      return out;
-    } catch (err) {
-      console.debug('[EngagementDetector] AI analyzeContinuity failed; returning empty.', err);
-      return [];
+    // Build detection targets on-demand when not provided
+    let effTargets: readonly EngagementDetectionTarget[] = targets ?? [];
+    if (!effTargets.length) {
+      const doc = await this.safeNLP(scene.text);
+      const sentences = splitSentences(scene.text);
+      const stats = computeOpeningStats(scene.text, sentences, doc);
+      const target = buildEngagementDetectionTarget(scene, previousScenes, stats, sentences);
+      effTargets = target.hookLine ? [target] : [];
     }
+    if (!effTargets.length) return [];
+
+    const cand = effTargets[0];
+    const header = buildAIHeader(scene, cand);
+    const body: string[] = [];
+    body.push('[[First sentences]]');
+    for (const s of cand.firstSentences) body.push(`- ${s}`);
+    body.push('[[Scene context (~900 chars)]]');
+    body.push(cand.contextWindow);
+    const textPayload = `${header}\n\n${body.join('\n')}`;
+    const lastPrev = previousScenes.slice(-1).map(s => ({ ...s, text: (s.text ?? '').slice(0, 600) }));
+    const baseReq = {
+      scene: { ...scene, text: textPayload },
+      previousScenes: lastPrev as Scene[],
+      analysisType: 'full' as const,
+      readerContext: buildReaderContextFromSummary(cand.previousSummary)
+    } as Parameters<AIServiceManager['analyzeContinuity']>[0];
+
+    const enriched = enrichAnalysisRequest(baseReq as any, {
+      scene,
+      detectorType: 'engagement',
+      flags: { critical: Boolean((scene as any)?.critical) },
+    });
+
+    console.debug('[EngagementDetector] invoking AI (full) for detection targets:', effTargets.length);
+    const { issues } = await runAnalysisWithOptionalConsensus(aiManager, enriched as any, {
+      critical: Boolean((enriched as any)?.flags?.critical),
+      consensusCount: 2,
+      acceptThreshold: 0.5,
+      humanReviewThreshold: 0.9,
+      maxModels: 2,
+    });
+
+    const out = mapAIEngagementIssues({ issues }, scene.text, cand.hookLine);
+    console.debug('[EngagementDetector] AI returned engagement issues:', out.length);
+    return out;
   }
 }

@@ -1,7 +1,7 @@
 import type { Scene, ContinuityIssue, ReaderKnowledge } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
 import { enrichAnalysisRequest, runAnalysisWithOptionalConsensus } from '../../../../services/ai/consensus/ConsensusAdapter';
-import BaseDetector, { LocalDetectionResult } from './BaseDetector';
+import BaseDetector from './BaseDetector';
 
 /**
  * Hybrid Plot/Context continuity detector (Detector 4 - Phase 2):
@@ -86,9 +86,6 @@ function previousScenesSignature(previous: readonly Scene[]): string {
   return previous.map(s => s.id).join('|');
 }
 
-function registryIsEmpty(reg: PreviousPlotRegistry): boolean {
-  return Object.keys(reg.events).length === 0 && Object.keys(reg.entities).length === 0 && reg.causal.length === 0;
-}
 
 // ---------- Exported helpers (testing hooks) ----------
 export function splitSentences(text: string): SentenceSpan[] {
@@ -430,40 +427,6 @@ export function assemblePlotDetectionTargets(
 export default class PlotContextDetector extends BaseDetector<PlotDetectionTarget> {
   public readonly detectorType = 'plot' as const;
 
-  protected async localDetection(
-    scene: Scene,
-    previousScenes: readonly Scene[],
-    _aiManager: AIServiceManager
-  ): Promise<LocalDetectionResult<PlotDetectionTarget>> {
-    if (!scene?.text || typeof scene.text !== 'string' || scene.text.trim().length === 0) {
-      return { issues: [], requiresAI: false, targets: [] };
-    }
- 
-    const doc = await this.prepareDoc(scene.text);
-    const sentences = splitSentences(scene.text);
-    const registry = buildPreviousPlotRegistry(previousScenes);
- 
-    const { observations, eventObs, worldObs, causalObs } = this.collectObservations(scene.text, sentences, registry, doc);
-    if (observations.length === 0 && registryIsEmpty(registry)) {
-      console.debug('[PlotContextDetector] No observations and empty registry; early exit.');
-      return { issues: [], requiresAI: false, targets: [], stats: { observations: 0 } };
-    }
- 
-    const { issues, targets } = this.buildIssuesAndTargets(scene.text, sentences, observations, registry, eventObs, worldObs, causalObs);
- 
-    console.debug('[PlotContextDetector] local counts:', {
-      sentences: sentences.length,
-      obs: observations.length,
-      events: eventObs.length,
-      world: worldObs.length,
-      causal: causalObs.length,
-      issues: issues.length,
-      targets: targets.length,
-    });
- 
-    const requiresAI = targets.length > 0;
-    return { issues, requiresAI, targets, stats: { observations: observations.length } };
-  }
 
   protected async aiDetection(
     scene: Scene,
@@ -471,32 +434,37 @@ export default class PlotContextDetector extends BaseDetector<PlotDetectionTarge
     aiManager: AIServiceManager,
     targets: readonly PlotDetectionTarget[]
   ): Promise<ContinuityIssue[]> {
-    if (!targets || targets.length === 0) return [];
-    const summary = (targets[0]?.registrySummary ?? []).slice(0, 8);
-    console.debug('[PlotContextDetector] invoking AI for targets:', targets.length);
+    // Build detection targets on-demand when not provided
+    let effTargets: readonly PlotDetectionTarget[] = targets ?? [];
+    if (!effTargets.length) {
+      const doc = await this.prepareDoc(scene.text);
+      const sentences = splitSentences(scene.text);
+      const registry = buildPreviousPlotRegistry(previousScenes);
+      const { observations } = this.collectObservations(scene.text, sentences, registry, doc);
+      effTargets = assemblePlotDetectionTargets(observations, registry, scene.text);
+    }
+    if (!effTargets.length) return [];
 
-    const baseReq = this.buildAIRequestComplex(scene, previousScenes, targets, summary) as any;
+    const summary = (effTargets[0]?.registrySummary ?? []).slice(0, 8);
+    console.debug('[PlotContextDetector] invoking AI for targets:', effTargets.length);
+
+    const baseReq = this.buildAIRequestComplex(scene, previousScenes, effTargets, summary) as any;
     const enriched = enrichAnalysisRequest(baseReq, {
       scene,
       detectorType: 'plot',
       flags: { critical: Boolean((scene as any)?.critical) },
     });
 
-    try {
-      const { issues } = await runAnalysisWithOptionalConsensus(aiManager, enriched as any, {
-        critical: Boolean((enriched as any)?.flags?.critical),
-        consensusCount: 2,
-        acceptThreshold: 0.5,
-        humanReviewThreshold: 0.9,
-        maxModels: 2,
-      });
-      const mapped = this.mapAIPlotResponse({ issues }, targets, scene.text, summary);
-      console.debug('[PlotContextDetector] AI returned plot issues:', mapped.length);
-      return mapped;
-    } catch (err) {
-      console.debug('[PlotContextDetector] AI analyzeContinuity failed; degrading to local-only.', err);
-      return [];
-    }
+    const { issues } = await runAnalysisWithOptionalConsensus(aiManager, enriched as any, {
+      critical: Boolean((enriched as any)?.flags?.critical),
+      consensusCount: 2,
+      acceptThreshold: 0.5,
+      humanReviewThreshold: 0.9,
+      maxModels: 2,
+    });
+    const mapped = this.mapAIPlotResponse({ issues }, effTargets, scene.text, summary);
+    console.debug('[PlotContextDetector] AI returned plot issues:', mapped.length);
+    return mapped;
   }
 
   // ---- Local helper methods (keep small) ----

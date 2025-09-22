@@ -1,15 +1,7 @@
 import type { Scene, ContinuityIssue, IssueSeverity, GlobalCoherenceAnalysis, ScenePairAnalysis } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
-
-/**
- * Local detection result from a specific detector before optional AI enrichment.
- */
-export interface LocalDetectionResult<T = unknown> {
-  issues: ContinuityIssue[];
-  requiresAI: boolean;
-  targets: readonly T[];
-  stats?: Record<string, number>;
-}
+import KeyGate from '../../../../services/ai/KeyGate';
+import { AIServiceError, ServiceUnavailableError } from '../../../../services/ai/errors/AIServiceErrors';
 
 /**
  * Abstract base class for all continuity detectors.
@@ -23,9 +15,11 @@ export default abstract class BaseDetector<TTarget = unknown> {
     | 'plot'
     | 'engagement';
 
+  private keyGate = new KeyGate();
+
   /**
-   * Run detection for a scene, optionally enriching with AI if requested by local pass.
-   * Robust to AI failures: returns at least local issues.
+   * AI-only detection path with centralized KeyGate validation.
+   * No local fallbacks. Structured error propagation.
    */
   public async detect(
     scene: Scene,
@@ -33,51 +27,29 @@ export default abstract class BaseDetector<TTarget = unknown> {
     aiManager: AIServiceManager,
     globalContext?: GlobalCoherenceAnalysis
   ): Promise<ContinuityIssue[]> {
+    // Validate provider key before any processing
+    await this.keyGate.requireKey('claude', { validate: true });
+
     try {
-      const local = await this.localDetection(scene, previousScenes, aiManager);
-      const baseIssues = Array.isArray(local.issues) ? local.issues : [];
-
+      // Only AI detection path
+      const aiIssues = await this.aiDetection(scene, previousScenes, aiManager, []);
       const enrichedIssues = globalContext
-        ? this.enrichWithGlobalContext(baseIssues, scene, globalContext)
-        : baseIssues;
+        ? this.enrichWithGlobalContext(aiIssues, scene, globalContext)
+        : aiIssues;
 
-      if (!local.requiresAI) {
-        console.debug(
-          `[${this.constructor.name}] Local-only detection complete: ${enrichedIssues.length} issue(s).`
-        );
-        return enrichedIssues;
+      console.debug(`[${this.constructor.name}] AI-only detection complete: ${enrichedIssues.length} issue(s).`);
+      return enrichedIssues;
+    } catch (error) {
+      // No fallbacks - propagate structured AI errors
+      if (error instanceof AIServiceError) {
+        throw error;
       }
-
-      try {
-        const aiIssues = await this.aiDetection(scene, previousScenes, aiManager, local.targets ?? []);
-        const merged = this.mergeResults(enrichedIssues, aiIssues);
-        console.debug(
-          `[${this.constructor.name}] AI-enriched detection complete: local=${enrichedIssues.length}, ai=${aiIssues.length}, merged=${merged.length}`
-        );
-        return merged;
-      } catch (aiErr) {
-        console.debug(`[${this.constructor.name}] AI enrichment failed; returning local issues only.`, aiErr);
-        return enrichedIssues;
-      }
-    } catch (err) {
-      console.debug(`[${this.constructor.name}] Local detection failed; returning empty list.`, err);
-      return [];
+      throw new ServiceUnavailableError(this.detectorType, 0);
     }
   }
 
   /**
-   * Implement local (non-AI) pass using heuristics, regex, or lightweight NLP.
-   * Should be fast and side-effect-free.
-   */
-  protected abstract localDetection(
-    scene: Scene,
-    previousScenes: readonly Scene[],
-    aiManager: AIServiceManager
-  ): Promise<LocalDetectionResult<TTarget>>;
-
-  /**
-   * Optional AI enrichment step, only called if localDetection.requiresAI === true.
-   * May consult the AIServiceManager to analyze detection targets and produce additional issues.
+   * AI detection step. Implementations must call providers via AIServiceManager and return issues.
    */
   protected abstract aiDetection(
     scene: Scene,
