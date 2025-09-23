@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
 import { Manuscript, GlobalCoherenceSettings, GlobalCoherenceAnalysis, GlobalCoherenceProgress } from '../shared/types';
+import type { ProviderName } from '../services/ai/types';
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
@@ -73,6 +74,70 @@ contextBridge.exposeInMainWorld('electronAPI', {
 contextBridge.exposeInMainWorld('electron', {
   ipcRenderer: {
     invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
+  }
+});
+
+// AI status/event bridge (non-blocking, IPC-safe)
+type AIStatus = { available: boolean; workingProviders: ProviderName[]; needsConfiguration: boolean };
+
+contextBridge.exposeInMainWorld('ai', {
+  aiStatus: {
+    onStatus: (cb: (status: AIStatus) => void) => {
+      if (!ipcRenderer || typeof cb !== 'function') {
+        return () => { /* no-op */ };
+      }
+      const listener = (_event: unknown, payload: any) => {
+        try {
+          if (!payload || typeof payload !== 'object') return;
+          const status = payload as Partial<AIStatus>;
+          const ok =
+            typeof status.available === 'boolean' &&
+            Array.isArray(status.workingProviders) &&
+            typeof status.needsConfiguration === 'boolean';
+          if (!ok) return;
+          cb(payload as AIStatus);
+        } catch {
+          // swallow
+        }
+      };
+      ipcRenderer.on('ai-services-status', listener);
+      return () => {
+        try { ipcRenderer.removeListener('ai-services-status', listener); } catch { /* noop */ }
+      };
+    },
+    onDegraded: (cb: () => void) => {
+      if (!ipcRenderer || typeof cb !== 'function') {
+        return () => { /* no-op */ };
+      }
+      const listener = () => {
+        try { cb(); } catch { /* noop */ }
+      };
+      ipcRenderer.on('ai-services-degraded', listener);
+      return () => {
+        try { ipcRenderer.removeListener('ai-services-degraded', listener); } catch { /* noop */ }
+      };
+    },
+    onConfigurationNotice: (cb: () => void) => {
+      if (!ipcRenderer || typeof cb !== 'function') {
+        return () => { /* no-op */ };
+      }
+      const listener = () => {
+        try { cb(); } catch { /* noop */ }
+      };
+      ipcRenderer.on('show-ai-configuration-notice', listener);
+      return () => {
+        try { ipcRenderer.removeListener('show-ai-configuration-notice', listener); } catch { /* noop */ }
+      };
+    },
+    check: async () => {
+      try {
+        if (ipcRenderer) {
+          ipcRenderer.send('check-ai-status');
+        }
+      } catch {
+        // swallow
+      }
+    }
   }
 });
 

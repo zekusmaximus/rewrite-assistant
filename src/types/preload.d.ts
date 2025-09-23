@@ -1,4 +1,5 @@
 import type { Manuscript, GlobalCoherenceSettings, GlobalCoherenceAnalysis, GlobalCoherenceProgress } from '../shared/types';
+import type { ProviderName } from '../services/ai/types';
 
 declare global {
   interface Window {
@@ -39,6 +40,17 @@ declare global {
         electron: string;
       };
     };
+
+    // AI status/event bridge
+    ai: {
+      aiStatus: {
+        onStatus(cb: (status: { available: boolean; workingProviders: ProviderName[]; needsConfiguration: boolean }) => void): () => void;
+        onDegraded(cb: () => void): () => void;
+        onConfigurationNotice(cb: () => void): () => void;
+        check(): Promise<void>;
+      };
+    };
+
     // Minimal ipc bridge typing (only what's exposed)
     electron: {
       ipcRenderer: {

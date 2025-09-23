@@ -15,6 +15,7 @@ import GlobalCoherencePanel from '../features/coherence/components/GlobalCoheren
 import GlobalCoherenceProgress from '../features/coherence/components/GlobalCoherenceProgress';
 import { useGlobalCoherenceStore } from '../features/coherence/stores/globalCoherenceStore';
 
+import { useAIStatusStore } from '../stores/aiStatusStore';
  
 const App: React.FC = () => {
   const { 
@@ -41,7 +42,11 @@ const App: React.FC = () => {
   const { analyzeMovedScenes } = useAnalysis();
   const { openSettings } = useSettingsStore();
   const didAutoLoadRef = useRef(false);
-
+  const isSettingsOpen = useSettingsStore((s) => s.isSettingsOpen);
+  const initIPC = useAIStatusStore((s) => s.initIPC);
+  const checkStatus = useAIStatusStore((s) => s.checkStatus);
+  const wasSettingsOpenRef = useRef(false);
+ 
   const getShortcutLabelForExport = (): string => {
     const ua = navigator.userAgent.toLowerCase();
     const platform = (navigator.platform || '').toLowerCase();
@@ -178,7 +183,20 @@ const App: React.FC = () => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isGlobalAnalyzing, setGlobalCoherenceOpen]);
- 
+
+  // Initialize AI status IPC bridge on mount
+  useEffect(() => {
+    initIPC();
+  }, [initIPC]);
+
+  // Revalidate AI availability after Settings modal closes (best-effort)
+  useEffect(() => {
+    if (wasSettingsOpenRef.current && !isSettingsOpen) {
+      void checkStatus();
+    }
+    wasSettingsOpenRef.current = isSettingsOpen;
+  }, [isSettingsOpen, checkStatus]);
+  
   const handleLoadFile = async () => {
     try {
       setLoading(true);
@@ -245,6 +263,7 @@ const App: React.FC = () => {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Rewrite Assistant</h1>
           <div className="flex gap-3">
+            {/* AIStatusIndicator to be added in a subsequent subtask */}
             <button
               onClick={handleNewFile}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"

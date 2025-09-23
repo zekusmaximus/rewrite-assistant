@@ -1,31 +1,34 @@
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import * as path from 'path';
 import { APP_CONFIG } from '../shared/constants';
 import { setupIPCHandlers } from './handlers';
 import KeyGate from '../services/ai/KeyGate';
-import { AIServiceError, MissingKeyError } from '../services/ai/errors/AIServiceErrors';
 import settingsService from './services/SettingsService';
-
-// Handle creating/removing shortcuts on Windows when installing/uninstalling (Windows only).
-if (process.platform === 'win32') {
-  try {
-    // Optional in dev; present in production on Windows. If missing, ignore.
-     
-    if (require('electron-squirrel-startup')) {
-      app.quit();
-      // Do not continue starting the app when handling Squirrel events.
-      // No 'return' at top-level; app.quit() is sufficient.
-    }
-  } catch {
-    // Module not found (e.g., dev or non-Windows env) — safely ignore.
-  }
-}
+import type { ProviderName } from '../services/ai/types';
 
 // Keep exported type as BrowserWindow to avoid breaking existing imports in handlers.
 let mainWindow: BrowserWindow;
 
 // Health monitor interval (cleared on quit/close)
 let healthMonitorInterval: NodeJS.Timeout | null = null;
+
+// Track previous availability to emit degraded notifications
+let lastAvailability: boolean | null = null;
+// Ensure we don't spam configuration notices
+let configurationNoticeSent = false;
+
+// Map KeyGate short names to ProviderName used across AIServiceManager
+const KEYGATE_TO_PROVIDER_NAME: Record<'claude' | 'openai' | 'gemini', ProviderName> = {
+  claude: 'anthropic',
+  openai: 'openai',
+  gemini: 'google',
+};
+
+type AIStatusPayload = {
+  available: boolean;
+  workingProviders: ProviderName[];
+  needsConfiguration: boolean;
+};
 
 /**
  * Shim KeyGate IPC calls when used from the main process.
@@ -107,81 +110,106 @@ const createWindow = (): void => {
 };
 
 /**
- * Validate that at least one AI provider is correctly configured and healthy.
- * Throws MissingKeyError (or a subclass of AIServiceError) when no provider is working.
+ * Compute current AI services status non-blockingly.
+ * Never throws; always resolves with a best-effort payload.
  */
-async function validateAIServicesOnStartup(): Promise<void> {
+async function computeAIStatus(): Promise<{ payload: AIStatusPayload; noneConfigured: boolean }> {
   ensureKeyGateShim();
-  const keyGate = new KeyGate();
-  const status = await keyGate.checkAllProviders();
 
-  if (!status.hasWorkingProvider) {
-    // Use generic provider label to satisfy constructor; userMessage communicates requirement clearly.
-    throw new MissingKeyError('any');
+  // Default pessimistic values
+  let available = false;
+  let workingProviders: ProviderName[] = [];
+  let needsConfiguration = true;
+  let noneConfigured = true;
+
+  try {
+    const settings = await settingsService.loadSettings();
+    const providers = (settings?.providers ?? {}) as Record<string, { apiKey?: string }>;
+    const configured: Array<'claude' | 'openai' | 'gemini'> = ['claude', 'openai', 'gemini'].filter((p) => {
+      const key = (providers as any)?.[p]?.apiKey;
+      return typeof key === 'string' && key.trim().length > 0;
+    }) as Array<'claude' | 'openai' | 'gemini'>;
+
+    noneConfigured = configured.length === 0;
+
+    // If nothing configured at all -> needsConfiguration true, available false
+    if (noneConfigured) {
+      available = false;
+      workingProviders = [];
+      needsConfiguration = true;
+    } else {
+      // Validate configured providers cheaply via KeyGate (cached validation)
+      const gate = new KeyGate();
+      const status = await gate.checkAllProviders().catch((err: unknown) => {
+        console.warn('[Main] AI status check failed (continuing):', (err as Error)?.message ?? String(err));
+        return { hasWorkingProvider: false, workingProviders: [] as Array<'claude' | 'openai' | 'gemini'> };
+      });
+
+      const mapped = (status.workingProviders || []).map((p) => KEYGATE_TO_PROVIDER_NAME[p]);
+      workingProviders = mapped.filter(Boolean) as ProviderName[];
+      available = workingProviders.length > 0;
+      // Per spec: needsConfiguration true if no configured keys OR keys invalid/missing (i.e., none working)
+      needsConfiguration = !available;
+    }
+  } catch (err) {
+    console.error('[Main] Unexpected error while computing AI status (continuing):', (err as Error)?.message ?? String(err));
+    available = false;
+    workingProviders = [];
+    needsConfiguration = true;
+    noneConfigured = true;
   }
+
+  return {
+    payload: {
+      available,
+      workingProviders,
+      needsConfiguration,
+    },
+    noneConfigured,
+  };
 }
 
 /**
- * Show a blocking modal indicating AI services configuration is required.
- * - Configure: opens the main window (without validation) and triggers 'open-settings-modal'
- * - Exit: quits the app
+ * Send a one-shot non-blocking AI status after window creation.
+ * Returns void; never throws.
  */
-async function showAIConfigurationRequired(error: Error): Promise<void> {
-  const detail =
-    error instanceof AIServiceError ? error.userMessage : (error?.message || 'Unknown AI configuration error');
+async function detectAIServicesOnStartup(): Promise<void> {
+  try {
+    const { payload, noneConfigured } = await computeAIStatus();
 
-  const attachTo = BrowserWindow.getAllWindows()[0];
+    // Update lastAvailability for degraded detection
+    lastAvailability = payload.available;
 
-  const opts = {
-    type: 'error' as const,
-    title: 'AI Services Required',
-    message: 'This application requires AI services to function.',
-    detail,
-    buttons: ['Configure API Keys', 'Exit'] as string[],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true,
-  };
-
-  const result = attachTo && !attachTo.isDestroyed()
-    ? await dialog.showMessageBox(attachTo, opts)
-    : await dialog.showMessageBox(opts);
-
-  // Configure
-  if (result.response === 0) {
-    // Ensure a window exists but do not re-run validation
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      createWindow();
-    }
-
-    const win = (!mainWindow || mainWindow.isDestroyed()) ? BrowserWindow.getAllWindows()[0] : mainWindow;
-
-    if (win && !win.isDestroyed()) {
-      const sendOpenSettings = (): void => {
-        try {
-          win.webContents.send('open-settings-modal');
-        } catch {
-          // ignore
-        }
-      };
-      if (win.webContents.isLoading()) {
-        win.webContents.once('did-finish-load', sendOpenSettings);
-      } else {
-        sendOpenSettings();
+    // Only send if renderer likely ready; otherwise skip (monitor will fire later)
+    const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0];
+    if (win && !win.isDestroyed() && !win.webContents.isLoading()) {
+      try {
+        win.webContents.send('ai-services-status', payload);
+      } catch (err) {
+        console.warn('[Main] Failed to send ai-services-status (continuing):', (err as Error)?.message ?? String(err));
       }
-    }
-    return;
-  }
 
-  // Exit
-  app.quit();
+      if (noneConfigured && !configurationNoticeSent) {
+        try {
+          win.webContents.send('show-ai-configuration-notice');
+          configurationNoticeSent = true;
+        } catch (err) {
+          console.warn('[Main] Failed to send show-ai-configuration-notice (continuing):', (err as Error)?.message ?? String(err));
+        }
+      }
+    } else {
+      console.warn('[Main] Renderer not ready; skipping initial AI status dispatch');
+    }
+  } catch {
+    // Swallow all
+  }
 }
 
 /**
  * Start periodic AI health monitoring (every 30s).
- * - Notifies renderer via 'ai-services-unavailable' when no providers work
- * - Shows dialog offering 'Check Settings' or 'Exit'
- * - Avoid async directly in setInterval to satisfy eslint no-misused-promises
+ * - Re-emits 'ai-services-status' updates
+ * - Emits 'ai-services-degraded' when previously available and now no providers work
+ * - Never throws; logs errors and continues
  */
 function startAIHealthMonitoring(): void {
   if (healthMonitorInterval) {
@@ -192,97 +220,114 @@ function startAIHealthMonitoring(): void {
   healthMonitorInterval = setInterval(() => {
     void (async () => {
       try {
-        ensureKeyGateShim();
-        const keyGate = new KeyGate();
-        const status = await keyGate.checkAllProviders();
+        const { payload } = await computeAIStatus();
 
-        if (!status.hasWorkingProvider) {
-          const win = (mainWindow && !mainWindow.isDestroyed())
-            ? mainWindow
-            : BrowserWindow.getAllWindows()[0];
-
-          // Notify renderer to disable AI-dependent features
+        const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0];
+        if (win && !win.isDestroyed()) {
           try {
-            if (win && !win.isDestroyed()) {
-              win.webContents.send('ai-services-unavailable');
-            }
-          } catch {
-            // ignore
+            win.webContents.send('ai-services-status', payload);
+          } catch (err) {
+            console.warn('[Main] Failed to send ai-services-status (continuing):', (err as Error)?.message ?? String(err));
           }
 
-          const options = {
-            type: 'warning' as const,
-            title: 'AI Services Unavailable',
-            message: 'AI services are no longer available.',
-            detail: 'The application cannot function without AI services.',
-            buttons: ['Check Settings', 'Exit'] as string[],
-            defaultId: 0,
-            cancelId: 0,
-            noLink: true,
-          };
-
-          let res: { response: number };
-          if (win && !win.isDestroyed()) {
-            res = await dialog.showMessageBox(win, options);
-          } else {
-            res = await dialog.showMessageBox(options);
-          }
-
-          if (res.response === 0) {
-            // Open settings in renderer
-            if (win && !win.isDestroyed()) {
-              try {
-                win.webContents.send('open-settings-modal');
-              } catch {
-                // ignore
-              }
+          // Degraded: was available, now unavailable
+          if (lastAvailability === true && payload.available === false) {
+            try {
+              win.webContents.send('ai-services-degraded');
+            } catch (err) {
+              console.warn('[Main] Failed to send ai-services-degraded (continuing):', (err as Error)?.message ?? String(err));
             }
-          } else {
-            app.quit();
           }
         }
-      } catch {
-        // silent - monitoring should be resilient
+
+        lastAvailability = payload.available;
+      } catch (err) {
+        console.warn('[Main] AI health monitor iteration failed (continuing):', (err as Error)?.message ?? String(err));
       }
     })();
   }, 30_000);
 }
 
 /**
- * Orchestrate app boot with validation so createWindow() stays pure.
+ * IPC: Renderer requests an immediate AI status check.
+ * Always responds by emitting 'ai-services-status' (event-based). Returns void; never throws.
  */
-async function bootApplicationWithValidation(): Promise<void> {
+function registerAIStatusIPC(): void {
   try {
-    await validateAIServicesOnStartup();
-    createWindow();
-
-    // Suppress harmless Autofill errors (duplicate guard kept for robustness)
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.on('console-message', (event, _level, message) => {
-        if (message.includes('Autofill.enable')) {
-          event.preventDefault();
+    ipcMain.on('check-ai-status', () => {
+      void (async () => {
+        try {
+          const { payload } = await computeAIStatus();
+          const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0];
+          if (win && !win.isDestroyed()) {
+            try {
+              win.webContents.send('ai-services-status', payload);
+            } catch (err) {
+              console.warn('[Main] Failed to send ai-services-status (on demand):', (err as Error)?.message ?? String(err));
+            }
+          }
+        } catch (err) {
+          console.warn('[Main] check-ai-status handler failed (continuing):', (err as Error)?.message ?? String(err));
         }
-      });
-    }
-
-    setupIPCHandlers();
-    startAIHealthMonitoring();
+      })();
+    });
   } catch (err) {
-    // Show configuration dialog; on 'Configure' a window will be created and settings opened
-    await showAIConfigurationRequired(err as Error);
+    console.warn('[Main] Failed to register check-ai-status IPC (continuing):', (err as Error)?.message ?? String(err));
   }
+}
+
+// Handle creating/removing shortcuts on Windows when installing/uninstalling (Windows only).
+if (process.platform === 'win32') {
+  try {
+    // Optional in dev; present in production on Windows. If missing, ignore.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    if (require('electron-squirrel-startup')) {
+      app.quit();
+      // Do not continue starting the app when handling Squirrel events.
+      // No 'return' at top-level; app.quit() is sufficient.
+    }
+  } catch {
+    // Module not found (e.g., dev or non-Windows env) — safely ignore.
+  }
+}
+
+/**
+ * Boot application non-blockingly:
+ * - Always create the window
+ * - Then run AI detection and start monitoring
+ */
+function bootApplication(): void {
+  createWindow();
+
+  // Minimal console-message suppression kept for robustness
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.on('console-message', (event, _level, message) => {
+      if (message.includes('Autofill.enable')) {
+        event.preventDefault();
+      }
+    });
+  }
+
+  setupIPCHandlers();
+  registerAIStatusIPC();
+
+  // Non-blocking AI detection and monitoring
+  void detectAIServicesOnStartup();
+  startAIHealthMonitoring();
 }
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 app.whenReady().then(() => {
-  void bootApplicationWithValidation();
+  bootApplication();
 
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
+      // After creating a new window, ensure monitoring continues and an initial status is dispatched
+      void detectAIServicesOnStartup();
     }
   });
 });
@@ -299,6 +344,12 @@ app.on('before-quit', () => {
   if (healthMonitorInterval) {
     clearInterval(healthMonitorInterval);
     healthMonitorInterval = null;
+  }
+  // Cleanup IPC listeners to avoid leaks on reload/quit
+  try {
+    ipcMain.removeAllListeners('check-ai-status');
+  } catch {
+    // ignore
   }
 });
 

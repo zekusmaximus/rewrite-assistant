@@ -5,6 +5,7 @@ import type { ProviderConfig, ProviderName, ProvidersConfigMap } from '../types'
 import { useAPIConfiguration } from '../hooks/useAPIConfiguration';
 import KeyGate from '../../../../services/ai/KeyGate';
 import { MissingKeyError, InvalidKeyError } from '../../../../services/ai/errors/AIServiceErrors';
+import { useAIStatusStore } from '../../../stores/aiStatusStore';
 
 type TestStatus = 'idle' | 'testing' | 'success' | 'error';
 
@@ -419,6 +420,7 @@ const SettingsModal: React.FC = () => {
   const { closeSettings, activeTab, setActiveTab, saveSettings, providers, isSettingsOpen, loadSettings } = useSettingsStore();
   const { configureProviders } = useAPIConfiguration();
   const [generalError, setGeneralError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'warning'; message: string } | null>(null);
 
   console.log('[SettingsModal] Rendering, isOpen:', isSettingsOpen, 'providers:', providers);
 
@@ -490,7 +492,14 @@ const SettingsModal: React.FC = () => {
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [isSettingsOpen, closeSettings]);
-
+  
+  // Clear feedback banner when modal is closed
+  useEffect(() => {
+    if (!isSettingsOpen) {
+      setFeedback(null);
+    }
+  }, [isSettingsOpen]);
+  
   const handleSave = async () => {
     const keyGate = new KeyGate();
     setGeneralError(null);
@@ -512,7 +521,7 @@ const SettingsModal: React.FC = () => {
         throw new Error('At least one working AI provider required');
       }
   
-      // Configure eligible providers and close
+      // Configure eligible providers
       const eligible: ProvidersConfigMap = {};
       for (const name of PROVIDERS) {
         const cfg = ensureConfig(providers[name]);
@@ -522,6 +531,17 @@ const SettingsModal: React.FC = () => {
         }
       }
       await configureProviders(eligible);
+  
+      // Revalidate AI status and provide inline feedback (debounced; never throws)
+      await useAIStatusStore.getState().checkStatus();
+      const { status } = useAIStatusStore.getState();
+      if (status.available) {
+        setFeedback({ type: 'success', message: 'AI services now active' });
+      } else {
+        setFeedback({ type: 'warning', message: 'Settings saved, but AI services are not available yet.' });
+      }
+  
+      // Close modal on successful save as before
       closeSettings();
     } catch (error) {
       if (error instanceof MissingKeyError) {
@@ -686,7 +706,23 @@ const SettingsModal: React.FC = () => {
             </div>
           )}
         </div>
-
+ 
+        {/* Inline feedback banner */}
+        {feedback ? (
+          <div style={{ margin: '0 24px 12px' }}>
+            <div style={{
+              border: feedback.type === 'success' ? '1px solid #86efac' : '1px solid #fcd34d',
+              backgroundColor: feedback.type === 'success' ? '#f0fdf4' : '#fffbeb',
+              color: feedback.type === 'success' ? '#065f46' : '#78350f',
+              borderRadius: '6px',
+              padding: '8px 12px',
+              fontSize: '12px'
+            }}>
+              {feedback.message}
+            </div>
+          </div>
+        ) : null}
+ 
         {/* Validation error (general) */}
         {generalError ? (
           <div style={{ margin: '0 24px 12px' }}>

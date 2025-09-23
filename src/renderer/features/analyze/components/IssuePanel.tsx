@@ -1,11 +1,10 @@
-import React, { useCallback, useMemo, useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useEffect } from 'react';
 import type { ContinuityIssue } from '../../../../shared/types';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import useAnalysis from '../hooks/useAnalysis';
 import AnalysisProgress from './AnalysisProgress';
 import IssueItem from './IssueItem';
-import KeyGate from '../../../../services/ai/KeyGate';
-import { AIServiceError, MissingKeyError } from '../../../../services/ai/errors/AIServiceErrors';
+import { useAIStatusStore } from '../../../stores/aiStatusStore';
 import { useSettingsStore } from '../../settings/stores/useSettingsStore';
 
 export interface IssuePanelProps {
@@ -28,33 +27,19 @@ const TYPE_LABELS: Record<IssueKind, string> = {
 function IssuePanel(props: IssuePanelProps) {
   const { isOpen = true, onClose, className, onShowInScene } = props;
 
-  const [keyGateError, setKeyGateError] = useState<AIServiceError | null>(null);
-  const keyGate = useMemo(() => new KeyGate(), []);
+  const status = useAIStatusStore((s) => s.status);
+  const checkStatus = useAIStatusStore((s) => s.checkStatus);
+  const requireAI = useAIStatusStore((s) => s.requireAI);
   const openSettings = useSettingsStore((s) => s.openSettings);
-
+  
   const manuscript = useManuscriptStore((s) => s.manuscript);
 
-  // Eager pre-flight validation when panel opens; block UI if no working providers
+  // Ensure AI status is fresh when the panel opens
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const health = await keyGate.checkAllProviders();
-        if (mounted) {
-          setKeyGateError(health.hasWorkingProvider ? null : new MissingKeyError('AI'));
-        }
-      } catch (e) {
-        if (mounted) {
-          if (e instanceof AIServiceError) {
-            setKeyGateError(e);
-          } else {
-            setKeyGateError(new MissingKeyError('AI'));
-          }
-        }
-      }
-    })();
-    return () => { mounted = false; };
-  }, [keyGate, isOpen]);
+    if (isOpen) {
+      void checkStatus();
+    }
+  }, [isOpen, checkStatus]);
 
   const {
     analyzeMovedScenes,
@@ -112,24 +97,22 @@ function IssuePanel(props: IssuePanelProps) {
 
   const handleAnalyze = useCallback(async () => {
     try {
-      // Pre-flight KeyGate check before showing any progress UI
-      const health = await keyGate.checkAllProviders();
-      if (!health.hasWorkingProvider) {
-        setKeyGateError(new MissingKeyError('AI'));
-        return;
-      }
-      setKeyGateError(null);
-      
-      // Proceed with analysis only after validation
+      // Enforce AI availability for this feature
+      requireAI('Continuity Analysis');
       await analyzeMovedScenes();
     } catch (error) {
-      if (error instanceof AIServiceError) {
-        setKeyGateError(error);
+      const err = error as unknown;
+      const code = (err as any)?.code as string | undefined;
+      const name = (err as Error | undefined)?.name;
+      if (code === 'AI_UNAVAILABLE' || name === 'AIUnavailableError') {
+        // Refresh status; UI will switch to configuration prompt if unavailable
+        await checkStatus();
         return;
       }
+      // Preserve existing behavior: rethrow for unexpected errors
       throw error;
     }
-  }, [analyzeMovedScenes, keyGate]);
+  }, [analyzeMovedScenes, requireAI, checkStatus]);
 
   const handleShowInScene = useCallback(
     (issue: ContinuityIssue, sceneId: string) => {
@@ -185,30 +168,51 @@ function IssuePanel(props: IssuePanelProps) {
     return <div className={className} />;
   }
 
-  // Block all analysis functionality if KeyGate fails
-  if (keyGateError) {
+  // Block all analysis functionality when AI is unavailable
+  if (!status.available) {
     return (
-      <div className="w-full rounded-lg border border-red-200 bg-red-50 p-4">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-red-600">⚠️</span>
-          <h3 className="font-semibold text-red-800">AI Services Required</h3>
+      <div
+        className={['rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-900', className].filter(Boolean).join(' ')}
+        role="status"
+        aria-live="polite"
+        title={status.lastChecked ? `Last checked: ${new Date(status.lastChecked).toLocaleString()}` : undefined}
+      >
+        <div className="mb-2">
+          <h3 className="font-semibold text-amber-900">AI Required: Continuity Analysis</h3>
         </div>
-        <p className="text-red-700 mb-3">{keyGateError.userMessage}</p>
-        {keyGateError.retryable ? (
+        <p className="mb-3">This feature needs at least one working AI provider. Add or fix your API keys in Settings.</p>
+        <div className="flex items-center gap-3">
           <button
-            onClick={() => setKeyGateError(null)}
-            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700"
+            type="button"
+            onClick={() => {
+              if (typeof openSettings === 'function') {
+                openSettings();
+              } else {
+                const storeAny = useSettingsStore as unknown as { getState?: () => any };
+                const state = storeAny?.getState?.();
+                if (typeof state?.setIsOpen === 'function') {
+                  state.setIsOpen(true);
+                } else if (typeof state?.setIsSettingsOpen === 'function') {
+                  state.setIsSettingsOpen(true);
+                } else {
+                  console.warn('[IssuePanel] No settings open handler available.');
+                }
+              }
+            }}
+            className="text-amber-800 underline decoration-amber-400 hover:text-amber-900"
+            aria-label="Open Settings"
           >
-            Retry
+            Open Settings
           </button>
-        ) : (
           <button
-            onClick={() => openSettings()}
-            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700"
+            type="button"
+            onClick={() => { void checkStatus(); }}
+            className="px-2 py-1 rounded-md border border-amber-300 text-amber-800 hover:bg-amber-100"
+            aria-label="Refresh AI status"
           >
-            Configure API Keys
+            Refresh Status
           </button>
-        )}
+        </div>
       </div>
     );
   }
