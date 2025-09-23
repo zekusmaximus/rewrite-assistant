@@ -1,5 +1,6 @@
 import type { Scene, ContinuityIssue, ContinuityAnalysis, ReaderKnowledge, GlobalCoherenceAnalysis } from '../../../../shared/types';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
+import { MissingKeyError, InvalidKeyError } from '../../../../services/ai/errors/AIServiceErrors';
 import AnalysisCache from '../../../../services/cache/AnalysisCache';
 import BaseDetector from '../detectors/BaseDetector';
 import PronounDetector from '../detectors/PronounDetector';
@@ -54,6 +55,9 @@ export async function runDetectorsSequential(
       console.debug(`[ContinuityAnalyzer] ${key} finished in ${durations[key]}ms; ${issues.length} issue(s).`);
     } catch (err) {
       durations[key] = Date.now() - started;
+      if (err instanceof MissingKeyError || err instanceof InvalidKeyError) {
+        throw err;
+      }
       console.debug(`[ContinuityAnalyzer] Detector ${instance.constructor.name} failed; recorded as empty.`, err);
       perDetector.set(key, []);
     }
@@ -86,6 +90,9 @@ export async function runDetectorsWithLimit(
       console.debug(`[ContinuityAnalyzer] ${entry.key} finished in ${durations[entry.key]}ms; ${issues.length} issue(s).`);
     } catch (err) {
       durations[entry.key] = Date.now() - started;
+      if (err instanceof MissingKeyError || err instanceof InvalidKeyError) {
+        throw err;
+      }
       console.debug(`[ContinuityAnalyzer] Detector ${entry.instance.constructor.name} failed; recorded as empty.`, err);
       perDetector.set(entry.key, []);
     }

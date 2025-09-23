@@ -3,7 +3,8 @@ import type { ContinuityAnalysis, Scene, Manuscript } from '../../../../shared/t
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import ContinuityAnalyzer from '../services/ContinuityAnalyzer';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
-
+import { MissingKeyError, InvalidKeyError } from '../../../../services/ai/errors/AIServiceErrors';
+ 
 /**
  * Local analysis stage indicator for UI and orchestration.
  */
@@ -41,6 +42,7 @@ interface AnalysisState {
   analyses: Map<string, ContinuityAnalysis>;
   selectedIssueTypes: Set<IssueFilter>;
   analysisOptions: AnalysisOptions;
+  errorMessage?: string;
 
   // Actions
   /**
@@ -217,7 +219,8 @@ const useAnalysisStore = create<AnalysisState>((set, get) => ({
         set((state) => ({
           ...state,
           isAnalyzing: false,
-          progress: { ...state.progress, stage: 'finalizing' },
+          progress: { ...state.progress, stage: 'ai-validation' },
+          errorMessage: 'No manuscript loaded; cannot analyze.',
         }));
         return;
       }
@@ -232,7 +235,8 @@ const useAnalysisStore = create<AnalysisState>((set, get) => ({
         set((state) => ({
           ...state,
           isAnalyzing: false,
-          progress: { ...state.progress, stage: 'finalizing' },
+          progress: { ...state.progress, stage: 'ai-validation' },
+          errorMessage: `Scene not found: ${sceneId}`,
         }));
         return;
       }
@@ -263,10 +267,20 @@ const useAnalysisStore = create<AnalysisState>((set, get) => ({
       }));
     } catch (err) {
       console.error('[analysisStore] analyzeScene failed:', err);
+      if (err instanceof MissingKeyError || err instanceof InvalidKeyError) {
+        set((state) => ({
+          ...state,
+          isAnalyzing: false,
+          progress: { ...state.progress, stage: 'ai-validation' },
+          errorMessage: err instanceof Error ? err.message : String(err),
+        }));
+        throw err;
+      }
       set((state) => ({
         ...state,
         isAnalyzing: false,
-        progress: { ...state.progress, stage: 'finalizing' },
+        progress: { ...state.progress, stage: 'ai-validation' },
+        errorMessage: err instanceof Error ? err.message : String(err),
       }));
       return;
     } finally {

@@ -20,6 +20,7 @@
 
 import { create } from 'zustand';
 import type { ProviderName } from '../../services/ai/types';
+import type { AIStatus } from '../../shared/types/ai';
 
 /**
  * Error thrown when AI usage is required but services are unavailable.
@@ -37,15 +38,7 @@ class AIUnavailableError extends Error {
   }
 }
 
-/**
- * Public status snapshot of AI services.
- */
-export interface AIStatus {
-  available: boolean;
-  workingProviders: ProviderName[];
-  needsConfiguration: boolean;
-  lastChecked: number; // epoch ms
-}
+ // AIStatus type imported from ../../shared/types/ai
 
 /**
  * Store interface with state and actions.
@@ -109,11 +102,72 @@ function uniqueProviders(list: ProviderName[]): ProviderName[] {
   return Array.from(new Set(list));
 }
 
+let latestCheckId = 0;
+
+type CheckResult = {
+  available: boolean;
+  workingProviders: ProviderName[];
+  needsConfiguration: boolean;
+  lastChecked: number;
+};
+
+const MIN_CHECK_DURATION_MS = 500;
+
+function waitForNextIPCResult(bridge: any, timeoutMs = 2000): Promise<CheckResult | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const finish = (res: CheckResult | null) => {
+      if (settled) return;
+      settled = true;
+      try { offStatus?.(); } catch (e) { void e; }
+      try { offDegraded?.(); } catch (e) { void e; }
+      if (timer) clearTimeout(timer as unknown as number);
+      resolve(res);
+    };
+
+    const offStatus = bridge?.onStatus?.((payload: IPCStatusPayload) => {
+      try {
+        if (!isValidIPCStatus(payload)) {
+          console.warn('[aiStatusStore] Ignoring invalid ai-services-status payload (one-shot):', payload);
+          return;
+        }
+        const now = Date.now();
+        finish({
+          available: payload.available,
+          workingProviders: payload.workingProviders,
+          needsConfiguration: payload.needsConfiguration,
+          lastChecked: now,
+        });
+      } catch {
+        // ignore
+      }
+    });
+
+    const offDegraded = bridge?.onDegraded?.(() => {
+      try {
+        const now = Date.now();
+        finish({
+          available: false,
+          workingProviders: [],
+          needsConfiguration: true,
+          lastChecked: now,
+        });
+      } catch {
+        // ignore
+      }
+    });
+
+    const timer = timeoutMs > 0 ? setTimeout(() => finish(null), timeoutMs) : undefined;
+  });
+}
+
 const initialStatus: AIStatus = {
   available: false,
   workingProviders: [],
   needsConfiguration: true,
   lastChecked: 0,
+  isChecking: false,
 };
 
 /**
@@ -157,6 +211,12 @@ export const useAIStatusStore = create<AIStatusStore>((set, get) => ({
             console.warn('[aiStatusStore] Ignoring invalid ai-services-status payload:', payload);
             return;
           }
+          // If a check is currently in progress, defer applying payload.
+          const current = get().status;
+          if (current.isChecking) {
+            // The active check routine will capture and apply the result atomically.
+            return;
+          }
           const now = Date.now();
           get().updateStatus({
             available: payload.available,
@@ -172,6 +232,11 @@ export const useAIStatusStore = create<AIStatusStore>((set, get) => ({
       // onDegraded: mark unavailable, clear providers, require configuration
       const offDegraded = bridge.onDegraded(() => {
         try {
+          const current = get().status;
+          if (current.isChecking) {
+            // Defer to active check completion to apply result atomically.
+            return;
+          }
           const now = Date.now();
           get().updateStatus({
             available: false,
@@ -233,16 +298,65 @@ export const useAIStatusStore = create<AIStatusStore>((set, get) => ({
     // Ensure IPC initialized
     get().initIPC();
 
-    // Reflect the request time immediately
-    set((state) => ({ status: { ...state.status, lastChecked: now } }));
+    const requestId = ++latestCheckId;
+    const start = now;
 
+    // Atomic start of check
+    set((state) => ({
+      status: {
+        ...state.status,
+        isChecking: true,
+        lastChecked: start,
+      },
+    }));
+
+    const bridge = (window as any)?.ai?.aiStatus;
+    const resultPromise: Promise<CheckResult | null> = bridge?.check
+      ? waitForNextIPCResult(bridge, 2000)
+      : Promise.resolve<CheckResult | null>(null);
+
+    // Trigger check immediately but do not await (avoid blocking callers/tests)
     try {
-      const bridge = (window as any)?.ai?.aiStatus;
-      await bridge?.check?.();
+      bridge?.check?.().catch((err: any) => {
+        console.error('[aiStatusStore] checkStatus error:', err);
+      });
     } catch (err) {
-      console.error('[aiStatusStore] checkStatus error:', err);
-      // swallow
+      console.error('[aiStatusStore] checkStatus unexpected error (invoke):', err);
     }
+
+    // Background completion handler to enforce minimum visible duration and atomic finish
+    void (async () => {
+      let result: CheckResult | null = null;
+      try {
+        result = await resultPromise;
+      } catch {
+        result = null;
+      }
+
+      // Enforce minimum visible duration
+      const elapsed = Date.now() - start;
+      if (elapsed < MIN_CHECK_DURATION_MS) {
+        await new Promise((r) => setTimeout(r, MIN_CHECK_DURATION_MS - elapsed));
+      }
+
+      // Only the latest check may apply completion
+      if (requestId !== latestCheckId) {
+        return;
+      }
+
+      const prev = get().status;
+      const next: AIStatus = {
+        ...prev,
+        isChecking: false,
+        available: result?.available ?? prev.available,
+        workingProviders: result?.workingProviders ? uniqueProviders(result.workingProviders) : prev.workingProviders,
+        needsConfiguration: result?.needsConfiguration ?? prev.needsConfiguration,
+        lastChecked: result?.lastChecked ?? Date.now(),
+      };
+
+      // Atomic completion of check
+      set({ status: next });
+    })();
   },
 
   requireAI: (feature: string) => {

@@ -77,6 +77,7 @@ function seedAIStatus(partial: Partial<ReturnType<typeof useAIStatusStore.getSta
     workingProviders: [] as Array<'openai' | 'anthropic' | 'google'>,
     needsConfiguration: true,
     lastChecked: 0,
+    isChecking: false,
   };
   useAIStatusStore.setState({ status: { ...base, ...partial } });
 }

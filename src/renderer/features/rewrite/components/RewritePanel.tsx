@@ -1,9 +1,11 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import useRewriteStore from '../stores/rewriteStore';
 import RewriteProgress from './RewriteProgress';
 import RewriteHistory from './RewriteHistory';
 import type { Scene } from '../../../../shared/types';
+import { useAIStatusStore } from '../../../stores/aiStatusStore';
+import { useSettingsStore } from '../../settings/stores/useSettingsStore';
 
 interface RewritePanelProps {
   className?: string;
@@ -12,7 +14,17 @@ interface RewritePanelProps {
 const RewritePanel: React.FC<RewritePanelProps> = ({ className = '' }) => {
   const manuscript = useManuscriptStore(state => state.manuscript);
   const [selectedTab, setSelectedTab] = useState<'overview' | 'batch' | 'history'>('overview');
-  
+
+  const status = useAIStatusStore((s) => s.status);
+  const checkStatus = useAIStatusStore((s) => s.checkStatus);
+  const requireAI = useAIStatusStore((s) => s.requireAI);
+  const openSettings = useSettingsStore((s) => s.openSettings);
+
+  // Ensure AI status is fresh on mount
+  useEffect(() => {
+    void checkStatus();
+  }, [checkStatus]);
+
   const {
     sceneRewrites,
     isBatchRewriting,
@@ -42,11 +54,90 @@ const RewritePanel: React.FC<RewritePanelProps> = ({ className = '' }) => {
   }, [manuscript, sceneRewrites]);
   
   const handleStartBatch = useCallback(async () => {
-    await startBatchRewrite({
-      skipIfNoIssues: true
-    });
-  }, [startBatchRewrite]);
-  
+    try {
+      // Enforce AI availability for this feature
+      requireAI('Content Rewriting');
+      await startBatchRewrite({
+        skipIfNoIssues: true
+      });
+    } catch (error) {
+      const err = error as unknown;
+      const code = (err as any)?.code as string | undefined;
+      const name = (err as Error | undefined)?.name;
+      if (code === 'AI_UNAVAILABLE' || name === 'AIUnavailableError') {
+        // Refresh status; UI will switch to configuration prompt if unavailable
+        await checkStatus();
+        return;
+      }
+      // Preserve existing behavior: rethrow for unexpected errors
+      throw error;
+    }
+  }, [startBatchRewrite, requireAI, checkStatus]);
+
+  // Loading state while AI status is being checked
+  if (status.isChecking) {
+    return (
+      <div className={['rounded-md border border-gray-300 bg-gray-50 p-4', className].filter(Boolean).join(' ')}>
+        <div className="flex items-center gap-3">
+          <div className="animate-spin h-5 w-5 border-2 border-gray-400 border-t-transparent rounded-full" />
+          <div>
+            <div className="font-semibold text-gray-900">Checking AI Services...</div>
+            <div className="text-sm text-gray-600 mt-1">Verifying API keys and provider availability</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Block all rewrite functionality when AI is unavailable
+  if (!status.isChecking && !status.available) {
+    return (
+      <div
+        className={['rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-900', className].filter(Boolean).join(' ')}
+        role="status"
+        aria-live="polite"
+        title={status.lastChecked ? `Last checked: ${new Date(status.lastChecked).toLocaleString()}` : undefined}
+      >
+        <div className="mb-2">
+          <h3 className="font-semibold text-amber-900">AI Required: Content Rewriting</h3>
+        </div>
+        <p className="mb-3">This feature needs at least one working AI provider. Add or fix your API keys in Settings.</p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof openSettings === 'function') {
+                openSettings();
+              } else {
+                const storeAny = useSettingsStore as unknown as { getState?: () => any };
+                const state = storeAny?.getState?.();
+                if (typeof state?.setIsOpen === 'function') {
+                  state.setIsOpen(true);
+                } else if (typeof state?.setIsSettingsOpen === 'function') {
+                  state.setIsSettingsOpen(true);
+                } else {
+                  console.warn('[RewritePanel] No settings open handler available.');
+                }
+              }
+            }}
+            className="text-amber-800 underline decoration-amber-400 hover:text-amber-900"
+            aria-label="Open Settings"
+          >
+            Open Settings
+          </button>
+          <button
+            type="button"
+            onClick={() => { void checkStatus(); }}
+            className="px-2 py-1 rounded-md border border-amber-300 text-amber-800 hover:bg-amber-100"
+            aria-label="Refresh AI status"
+          >
+            Refresh Status
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!manuscript || !stats) {
     return (
       <div className={`p-4 text-center text-gray-500 ${className}`}>
@@ -193,6 +284,26 @@ const SceneRewriteStatus: React.FC<{ scene: Scene }> = ({ scene }) => {
   const { hasRewrite, generateRewrite } = useRewriteStore();
   const hasRewriteReady = hasRewrite(scene.id);
   const issueCount = scene.continuityAnalysis?.issues?.length || 0;
+
+  const checkStatus = useAIStatusStore((s) => s.checkStatus);
+  const requireAI = useAIStatusStore((s) => s.requireAI);
+
+  const handleGenerate = useCallback(async () => {
+    try {
+      // Enforce AI availability for this feature
+      requireAI('Content Rewriting');
+      await generateRewrite(scene.id);
+    } catch (error) {
+      const err = error as unknown;
+      const code = (err as any)?.code as string | undefined;
+      const name = (err as Error | undefined)?.name;
+      if (code === 'AI_UNAVAILABLE' || name === 'AIUnavailableError') {
+        await checkStatus();
+        return;
+      }
+      throw error;
+    }
+  }, [requireAI, generateRewrite, scene.id, checkStatus]);
   
   return (
     <div className="px-4 py-3 flex items-center justify-between hover:bg-gray-50">
@@ -217,7 +328,7 @@ const SceneRewriteStatus: React.FC<{ scene: Scene }> = ({ scene }) => {
         )}
         {!hasRewriteReady && (
           <button
-            onClick={() => generateRewrite(scene.id)}
+            onClick={handleGenerate}
             className="text-xs px-3 py-1 text-blue-600 hover:bg-blue-50 rounded"
           >
             Generate

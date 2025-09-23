@@ -6,6 +6,8 @@ import type {
   GlobalCoherenceProgress,
   GlobalCoherenceAnalysis,
 } from '../../../../shared/types';
+import { useAIStatusStore } from '../../../stores/aiStatusStore';
+import { useSettingsStore } from '../../settings/stores/useSettingsStore';
 
 const PASS_LABELS: Record<GlobalCoherenceProgress['currentPass'], string> = {
   transitions: 'Scene Transitions',
@@ -54,6 +56,16 @@ function formatETA(seconds: number): string {
 
 export const GlobalCoherencePanel: React.FC = () => {
   const manuscript = useManuscriptStore((s) => s.manuscript);
+
+  const status = useAIStatusStore((s) => s.status);
+  const checkStatus = useAIStatusStore((s) => s.checkStatus);
+  const requireAI = useAIStatusStore((s) => s.requireAI);
+  const openSettings = useSettingsStore((s) => s.openSettings);
+
+  // Ensure AI status is fresh on mount
+  useEffect(() => {
+    void checkStatus();
+  }, [checkStatus]);
 
   const {
     isAnalyzing,
@@ -126,8 +138,23 @@ export const GlobalCoherencePanel: React.FC = () => {
       }
     }
 
-    await startAnalysis(manuscript, { ...localSettings });
-  }, [manuscript, costEstimate, startAnalysis, localSettings]);
+    try {
+      // Enforce AI availability for this feature
+      requireAI('Global Coherence Analysis');
+      await startAnalysis(manuscript, { ...localSettings });
+    } catch (error) {
+      const err = error as unknown;
+      const code = (err as any)?.code as string | undefined;
+      const name = (err as Error | undefined)?.name;
+      if (code === 'AI_UNAVAILABLE' || name === 'AIUnavailableError') {
+        // Refresh status; UI will switch to configuration prompt if unavailable
+        await checkStatus();
+        return;
+      }
+      // Preserve existing behavior: rethrow for unexpected errors
+      throw error;
+    }
+  }, [manuscript, costEstimate, startAnalysis, localSettings, requireAI, checkStatus]);
 
   const handleCancel = useCallback(() => {
     cancelAnalysis();
@@ -152,6 +179,70 @@ export const GlobalCoherencePanel: React.FC = () => {
       total: flow + pacing + theme + arc,
     };
   }, [lastAnalysis]);
+
+  // Loading state while AI status is being checked
+  if (status.isChecking) {
+    return (
+      <div className={['rounded-md border border-gray-300 bg-gray-50 p-4'].join(' ')}>
+        <div className="flex items-center gap-3">
+          <div className="animate-spin h-5 w-5 border-2 border-gray-400 border-t-transparent rounded-full" />
+          <div>
+            <div className="font-semibold text-gray-900">Checking AI Services...</div>
+            <div className="text-sm text-gray-600 mt-1">Verifying API keys and provider availability</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Block all analysis functionality when AI is unavailable
+  if (!status.isChecking && !status.available) {
+    return (
+      <div
+        className={['rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-900'].join(' ')}
+        role="status"
+        aria-live="polite"
+        title={status.lastChecked ? `Last checked: ${new Date(status.lastChecked).toLocaleString()}` : undefined}
+      >
+        <div className="mb-2">
+          <h3 className="font-semibold text-amber-900">AI Required: Global Coherence Analysis</h3>
+        </div>
+        <p className="mb-3">This feature needs at least one working AI provider. Add or fix your API keys in Settings.</p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof openSettings === 'function') {
+                openSettings();
+              } else {
+                const storeAny = useSettingsStore as unknown as { getState?: () => any };
+                const state = storeAny?.getState?.();
+                if (typeof state?.setIsOpen === 'function') {
+                  state.setIsOpen(true);
+                } else if (typeof state?.setIsSettingsOpen === 'function') {
+                  state.setIsSettingsOpen(true);
+                } else {
+                  console.warn('[GlobalCoherencePanel] No settings open handler available.');
+                }
+              }
+            }}
+            className="text-amber-800 underline decoration-amber-400 hover:text-amber-900"
+            aria-label="Open Settings"
+          >
+            Open Settings
+          </button>
+          <button
+            type="button"
+            onClick={() => { void checkStatus(); }}
+            className="px-2 py-1 rounded-md border border-amber-300 text-amber-800 hover:bg-amber-100"
+            aria-label="Refresh AI status"
+          >
+            Refresh Status
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/40">

@@ -19,6 +19,7 @@ import type {
   Location,
 } from '../../shared/types';
 import AIServiceManager from '../ai/AIServiceManager';
+import { MissingKeyError, InvalidKeyError } from '../ai/errors/AIServiceErrors';
 import AnalysisCache from '../cache/AnalysisCache';
 // Wildcard import to be resilient to either default or named export for ManuscriptCompressor
 import * as ManuscriptCompressorModule from './ManuscriptCompressor';
@@ -174,6 +175,9 @@ export class GlobalAnalysisOrchestrator {
         const firstModel = modelsMap.values().next().value;
         if (firstModel) this.modelsUsed['transitions'] = firstModel;
       } catch (error) {
+        if (error instanceof MissingKeyError || error instanceof InvalidKeyError) {
+          throw error;
+        }
         console.error('[GlobalAnalysisOrchestrator] Transition pass failed:', error);
         errors.push({ pass: 'transitions', error: String(error) });
       }
@@ -216,6 +220,9 @@ export class GlobalAnalysisOrchestrator {
         this.mergeSequenceFindings(sceneLevel, sequenceResults);
         emit(progress, { sceneLevel, flowIssues, pacingProblems, thematicBreaks });
       } catch (error) {
+        if (error instanceof MissingKeyError || error instanceof InvalidKeyError) {
+          throw error;
+        }
         console.error('[GlobalAnalysisOrchestrator] Sequence pass failed:', error);
         errors.push({ pass: 'sequences', error: String(error) });
       }
@@ -250,6 +257,9 @@ export class GlobalAnalysisOrchestrator {
           if (chapFirst) this.modelsUsed['chapters'] = chapFirst;
         }
       } catch (error) {
+        if (error instanceof MissingKeyError || error instanceof InvalidKeyError) {
+          throw error;
+        }
         console.error('[GlobalAnalysisOrchestrator] Chapter pass failed:', error);
         errors.push({ pass: 'chapters', error: String(error) });
       }
@@ -279,6 +289,9 @@ export class GlobalAnalysisOrchestrator {
         const arcModel = this.arcValidator.getModelUsed?.();
         if (arcModel) this.modelsUsed['arc'] = arcModel;
       } catch (error) {
+        if (error instanceof MissingKeyError || error instanceof InvalidKeyError) {
+          throw error;
+        }
         console.error('[GlobalAnalysisOrchestrator] Arc pass failed:', error);
         errors.push({ pass: 'arc', error: String(error) });
       }
@@ -312,6 +325,9 @@ export class GlobalAnalysisOrchestrator {
         const synthModel = this.synthesisEngine.getModelUsed?.();
         if (synthModel) this.modelsUsed['synthesis'] = synthModel;
       } catch (error) {
+        if (error instanceof MissingKeyError || error instanceof InvalidKeyError) {
+          throw error;
+        }
         console.error('[GlobalAnalysisOrchestrator] Synthesis pass failed:', error);
         errors.push({ pass: 'synthesis', error: String(error) });
         analysis = this.createBasicAnalysis(sceneLevel, chapterLevel, manuscriptLevel, settings);

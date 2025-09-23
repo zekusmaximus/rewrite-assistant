@@ -16,6 +16,8 @@ import OpenAIProvider from './providers/OpenAIProvider';
 import GeminiProvider from './providers/GeminiProvider';
 import BaseProvider from './providers/BaseProvider';
 import ModelPerformanceTracker from './optimization/ModelPerformanceTracker';
+import KeyGate from './KeyGate';
+import { MissingKeyError, InvalidKeyError } from './errors/AIServiceErrors';
 
 /**
  * Model capability registry used for routing and fallbacks.
@@ -147,7 +149,9 @@ export class AIServiceManager {
   // Internal performance tracker singleton (overridable in tests only)
   private static __testTracker: ModelPerformanceTracker | null = null;
   private tracker: ModelPerformanceTracker;
- 
+  private static __testKeyGate: KeyGate | null = null;
+  private keyGate: KeyGate;
+  
   private perProviderMetrics: Record<string, ProviderMetrics> = {};
   private typeDurations: Record<AnalysisType, { total: number; count: number }> = {
     simple: { total: 0, count: 0 },
@@ -158,15 +162,46 @@ export class AIServiceManager {
   private _totalRequests = 0;
   private lastErrors: Record<string, string> = {};
  
-  constructor(cache?: PromptCache, breaker?: CircuitBreaker) {
+  constructor(cache?: PromptCache, breaker?: CircuitBreaker, keyGate?: KeyGate) {
     this.cache = cache ?? new PromptCache(100, 5 * 60_000);
     this.breaker = breaker ?? new CircuitBreaker();
     this.tracker = AIServiceManager.__testTracker ?? new ModelPerformanceTracker();
+    this.keyGate = AIServiceManager.__testKeyGate ?? keyGate ?? new KeyGate();
   }
 
   /** @internal for unit tests only */
   public static __setTestTracker(tracker: ModelPerformanceTracker | null) {
     AIServiceManager.__testTracker = tracker;
+  }
+
+  /** @internal for unit tests only */
+  public static __setTestKeyGate(kg: KeyGate | null) {
+    AIServiceManager.__testKeyGate = kg;
+  }
+
+  /** Provider short-name resolution for KeyGate enforcement */
+  private getProviderShortName(modelId: string): ProviderType {
+    const reg = MODEL_REGISTRY.find((m) => m.id === modelId);
+    if (reg) return reg.providerType;
+
+    const id = (modelId || '').toLowerCase();
+    if (id.includes('claude') || id.includes('opus') || id.includes('sonnet') || id.includes('haiku')) {
+      return 'claude';
+    }
+    if (
+      id.includes('gpt') ||
+      id.includes('o1') ||
+      id.includes('o3') ||
+      id.includes('text-davinci') ||
+      id.includes('openai')
+    ) {
+      return 'openai';
+    }
+    if (id.includes('gemini') || id.includes('google')) {
+      return 'gemini';
+    }
+    // Safe default
+    return 'openai';
   }
 
   /**
@@ -253,6 +288,9 @@ export class AIServiceManager {
         return lastResponse;
       }
     } catch (e) {
+      if (e instanceof MissingKeyError || e instanceof InvalidKeyError) {
+        throw e;
+      }
       lastError = e;
     }
 
@@ -270,6 +308,9 @@ export class AIServiceManager {
           return lastResponse;
         }
       } catch (e) {
+        if (e instanceof MissingKeyError || e instanceof InvalidKeyError) {
+          throw e;
+        }
         lastError = e;
         continue;
       }
@@ -332,6 +373,9 @@ export class AIServiceManager {
         this.cache.set(req, response);
         return response;
       } catch (err) {
+        if (err instanceof MissingKeyError || err instanceof InvalidKeyError) {
+          throw err;
+        }
         // TODO: Replace console.log with production logger
         console.log(`[AIServiceManager] analyze via ${model} failed:`, err);
         lastError = err;
@@ -353,6 +397,10 @@ export class AIServiceManager {
     model: string,
     req: AnalysisRequest
   ): Promise<AnalysisResponse> {
+    // Enforce KeyGate validation before any provider call
+    const short = this.getProviderShortName(model);
+    await this.keyGate.requireKey(short, { validate: true });
+
     const started = Date.now();
     const result = await provider.analyze(req);
     const duration = Date.now() - started;

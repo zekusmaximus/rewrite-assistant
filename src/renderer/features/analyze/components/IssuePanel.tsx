@@ -168,8 +168,23 @@ function IssuePanel(props: IssuePanelProps) {
     return <div className={className} />;
   }
 
+  // Loading state while AI status is being checked
+  if (status.isChecking) {
+    return (
+      <div className={['rounded-md border border-gray-300 bg-gray-50 p-4', className].filter(Boolean).join(' ')}>
+        <div className="flex items-center gap-3">
+          <div className="animate-spin h-5 w-5 border-2 border-gray-400 border-t-transparent rounded-full" />
+          <div>
+            <div className="font-semibold text-gray-900">Checking AI Services...</div>
+            <div className="text-sm text-gray-600 mt-1">Verifying API keys and provider availability</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Block all analysis functionality when AI is unavailable
-  if (!status.available) {
+  if (!status.isChecking && !status.available) {
     return (
       <div
         className={['rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-900', className].filter(Boolean).join(' ')}
