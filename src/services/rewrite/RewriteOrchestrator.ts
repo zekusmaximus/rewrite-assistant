@@ -1,5 +1,5 @@
 import SceneRewriter from './SceneRewriter';
-import type { Scene, ContinuityIssue, ReaderKnowledge } from '../../shared/types';
+import type { Scene, ReaderKnowledge } from '../../shared/types';
 import type { RewriteResult } from './SceneRewriter';
 import AIServiceManager from '../ai/AIServiceManager';
 

@@ -3,7 +3,6 @@ import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import useRewriteStore from '../stores/rewriteStore';
 import RewriteProgress from './RewriteProgress';
 import RewriteHistory from './RewriteHistory';
-import ChangeExplanation from './ChangeExplanation';
 import type { Scene } from '../../../../shared/types';
 
 interface RewritePanelProps {

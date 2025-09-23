@@ -6,6 +6,7 @@ import CharacterDetector from '../detectors/CharacterDetector';
 import PlotContextDetector from '../detectors/PlotContextDetector';
 import EngagementDetector from '../detectors/EngagementDetector';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
+import KeyGate from '../../../../services/ai/KeyGate';
 import { ValidationPipeline } from '../../../../services/ai/validation/ValidationPipeline';
 
 type AnalyzeReq = Parameters<AIServiceManager['analyzeContinuity']>[0];
@@ -74,6 +75,8 @@ function makeManagerStub(recorded: AnalyzeReq[]) {
 describe('Detector integration - AnalysisRequest enrichment and consensus adapter', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    // Unit tests should not require real keys; stub KeyGate validation
+    vi.spyOn(KeyGate.prototype, 'requireKey').mockResolvedValue('test-key');
   });
 
   it('non-critical pronoun request: single analyze call with enriched fields', async () => {

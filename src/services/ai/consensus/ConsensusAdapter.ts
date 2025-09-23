@@ -1,5 +1,5 @@
-import type { Scene, ContinuityIssue, ReaderKnowledge } from '../../../shared/types';
-import type { AnalysisRequest, AnalysisType } from '../types';
+import type { Scene, ContinuityIssue } from '../../../shared/types';
+import type { AnalysisRequest } from '../types';
 import AIServiceManager from '../AIServiceManager';
 import { ValidationPipeline } from '../validation/ValidationPipeline';
 

@@ -142,7 +142,6 @@ class ManuscriptExporter {
     rewrites: Map<string, RewriteVersion[]>,
     options: ExportOptions
   ): string {
-    const orderedScenes = this.getOrderedScenes(manuscript);
     const sections: string[] = [];
     
     // Add table of contents

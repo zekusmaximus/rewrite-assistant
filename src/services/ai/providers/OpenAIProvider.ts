@@ -12,12 +12,6 @@ import { buildOpenAIPrompt, getOpenAIResponseFormat } from '../prompts/OpenAIPro
 import { estimateMessageTokens, estimateTokensForModel } from '../utils/Tokenizers';
 import { estimateCost as estimateUsdCost } from '../optimization/Pricing';
 
-function costTierForModel(model: string | undefined): 'low' | 'medium' | 'high' {
-  const m = (model ?? '').toLowerCase();
-  if (m.includes('gpt-5')) return 'low';
-  if (m.includes('o1') || m.includes('o3') || m.includes('gpt-4')) return 'high';
-  return 'medium';
-}
 
 /**
  * OpenAI Chat Completions provider implementation.
@@ -103,7 +97,7 @@ export class OpenAIProvider extends BaseProvider<OpenAIConfig> {
       let outputText = '';
       try {
         outputText = raw?.choices?.[0]?.message?.content ?? '';
-      } catch {}
+      } catch { /* noop */ }
       let outputTokensEstimate =
         raw && raw.usage && Number.isFinite(raw.usage.completion_tokens)
           ? Math.max(0, Number(raw.usage.completion_tokens))

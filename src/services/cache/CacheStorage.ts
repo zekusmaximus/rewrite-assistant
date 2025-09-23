@@ -420,7 +420,7 @@ export default class CacheStorage {
     try {
       const payload = serializeCachedAnalysis(analysis);
       if (!payload) return; // skip if serialization failed
-      const now = Date.now();
+      
       const sceneId = meta?.sceneId ?? null;
       const position = typeof meta?.position === 'number' ? meta!.position : null;
 
@@ -511,7 +511,7 @@ export default class CacheStorage {
   }
 
   private bumpAccess(cacheKey: string, bumpL1: boolean, bumpL2: boolean): void {
-    const now = Date.now();
+     const now = Date.now();
     if (bumpL1) {
       const val = this.l1.get(cacheKey);
       if (val) {

@@ -1,0 +1,14 @@
+{
+  "throughput": {},
+  "memory": {},
+  "latency": {},
+  "timestamp": "2025-09-23T00:15:25.551Z",
+  "environment": {
+    "node": "v22.14.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpus": 16,
+    "totalMem": 16264327168,
+    "ci": false
+  }
+}

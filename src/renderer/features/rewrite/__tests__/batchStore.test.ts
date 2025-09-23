@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, expect, vi } from 'vitest';
+import { describe, it, beforeEach, expect } from 'vitest';
 import useRewriteStore from '../stores/rewriteStore';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import type { Manuscript, Scene, ContinuityIssue, ReaderKnowledge } from '../../../../shared/types';

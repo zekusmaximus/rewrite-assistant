@@ -1,9 +1,12 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import type { ContinuityIssue } from '../../../../shared/types';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import useAnalysis from '../hooks/useAnalysis';
 import AnalysisProgress from './AnalysisProgress';
 import IssueItem from './IssueItem';
+import KeyGate from '../../../../services/ai/KeyGate';
+import { AIServiceError, MissingKeyError } from '../../../../services/ai/errors/AIServiceErrors';
+import { useSettingsStore } from '../../settings/stores/useSettingsStore';
 
 export interface IssuePanelProps {
   isOpen?: boolean;
@@ -25,8 +28,33 @@ const TYPE_LABELS: Record<IssueKind, string> = {
 function IssuePanel(props: IssuePanelProps) {
   const { isOpen = true, onClose, className, onShowInScene } = props;
 
+  const [keyGateError, setKeyGateError] = useState<AIServiceError | null>(null);
+  const keyGate = useMemo(() => new KeyGate(), []);
+  const openSettings = useSettingsStore((s) => s.openSettings);
 
   const manuscript = useManuscriptStore((s) => s.manuscript);
+
+  // Eager pre-flight validation when panel opens; block UI if no working providers
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const health = await keyGate.checkAllProviders();
+        if (mounted) {
+          setKeyGateError(health.hasWorkingProvider ? null : new MissingKeyError('AI'));
+        }
+      } catch (e) {
+        if (mounted) {
+          if (e instanceof AIServiceError) {
+            setKeyGateError(e);
+          } else {
+            setKeyGateError(new MissingKeyError('AI'));
+          }
+        }
+      }
+    })();
+    return () => { mounted = false; };
+  }, [keyGate, isOpen]);
 
   const {
     analyzeMovedScenes,
@@ -82,9 +110,26 @@ function IssuePanel(props: IssuePanelProps) {
     [toggleIssueType]
   );
 
-  const handleAnalyze = useCallback(() => {
-    void analyzeMovedScenes();
-  }, [analyzeMovedScenes]);
+  const handleAnalyze = useCallback(async () => {
+    try {
+      // Pre-flight KeyGate check before showing any progress UI
+      const health = await keyGate.checkAllProviders();
+      if (!health.hasWorkingProvider) {
+        setKeyGateError(new MissingKeyError('AI'));
+        return;
+      }
+      setKeyGateError(null);
+      
+      // Proceed with analysis only after validation
+      await analyzeMovedScenes();
+    } catch (error) {
+      if (error instanceof AIServiceError) {
+        setKeyGateError(error);
+        return;
+      }
+      throw error;
+    }
+  }, [analyzeMovedScenes, keyGate]);
 
   const handleShowInScene = useCallback(
     (issue: ContinuityIssue, sceneId: string) => {
@@ -138,6 +183,34 @@ function IssuePanel(props: IssuePanelProps) {
   // Guard return after all hooks to keep hooks order stable
   if (!isOpen) {
     return <div className={className} />;
+  }
+
+  // Block all analysis functionality if KeyGate fails
+  if (keyGateError) {
+    return (
+      <div className="w-full rounded-lg border border-red-200 bg-red-50 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-red-600">⚠️</span>
+          <h3 className="font-semibold text-red-800">AI Services Required</h3>
+        </div>
+        <p className="text-red-700 mb-3">{keyGateError.userMessage}</p>
+        {keyGateError.retryable ? (
+          <button
+            onClick={() => setKeyGateError(null)}
+            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700"
+          >
+            Retry
+          </button>
+        ) : (
+          <button
+            onClick={() => openSettings()}
+            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700"
+          >
+            Configure API Keys
+          </button>
+        )}
+      </div>
+    );
   }
 
   return (

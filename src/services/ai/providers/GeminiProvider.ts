@@ -23,12 +23,6 @@ function buildGeminiUrl(model: string, apiKey: string, baseUrl?: string): string
   )}`;
 }
 
-function costTierForModel(model: string | undefined): 'low' | 'medium' | 'high' {
-  const m = (model ?? '').toLowerCase();
-  if (m.includes('pro')) return 'low';
-  if (m.includes('flash') || m.includes('lite')) return 'low';
-  return 'medium';
-}
 
 /**
  * Google Gemini provider implementation using generateContent API.
@@ -122,7 +116,7 @@ export class GeminiProvider extends BaseProvider<GeminiConfig> {
         const partsOut = firstCandidate?.content?.parts ?? [];
         const withText = partsOut.find((p: { text?: string }) => typeof p.text === 'string' && ((p.text?.length ?? 0) > 0));
         outputText = withText?.text ?? '';
-      } catch {}
+      } catch { void 0; }
 
       // Token usage fields if they appear in future:
       const usageIn = Number(raw?.usageMetadata?.promptTokenCount);

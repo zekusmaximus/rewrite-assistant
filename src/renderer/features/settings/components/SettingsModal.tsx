@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import type { ProviderConfig, ProviderName, ProvidersConfigMap } from '../types';
 import { useAPIConfiguration } from '../hooks/useAPIConfiguration';
+import KeyGate from '../../../../services/ai/KeyGate';
+import { MissingKeyError, InvalidKeyError } from '../../../../services/ai/errors/AIServiceErrors';
 
 type TestStatus = 'idle' | 'testing' | 'success' | 'error';
 
@@ -416,6 +418,7 @@ const ProviderBlock: React.FC<{
 const SettingsModal: React.FC = () => {
   const { closeSettings, activeTab, setActiveTab, saveSettings, providers, isSettingsOpen, loadSettings } = useSettingsStore();
   const { configureProviders } = useAPIConfiguration();
+  const [generalError, setGeneralError] = useState<string | null>(null);
 
   console.log('[SettingsModal] Rendering, isOpen:', isSettingsOpen, 'providers:', providers);
 
@@ -489,8 +492,27 @@ const SettingsModal: React.FC = () => {
   }, [isSettingsOpen, closeSettings]);
 
   const handleSave = async () => {
-    const success = await saveSettings();
-    if (success) {
+    const keyGate = new KeyGate();
+    setGeneralError(null);
+    try {
+      // Persist current settings first
+      const success = await saveSettings();
+      if (!success) {
+        throw new Error('Failed to save settings');
+      }
+  
+      // Validate providers using KeyGate; classify specific errors when possible
+      const health = await keyGate.checkAllProviders();
+      if (!health.hasWorkingProvider) {
+        // Attempt to surface typed errors by probing each provider; first failure will bubble up
+        await keyGate.requireKey('claude', { validate: true });
+        await keyGate.requireKey('openai', { validate: true });
+        await keyGate.requireKey('gemini', { validate: true });
+        // If none threw a typed error (unlikely), fallback
+        throw new Error('At least one working AI provider required');
+      }
+  
+      // Configure eligible providers and close
       const eligible: ProvidersConfigMap = {};
       for (const name of PROVIDERS) {
         const cfg = ensureConfig(providers[name]);
@@ -501,8 +523,14 @@ const SettingsModal: React.FC = () => {
       }
       await configureProviders(eligible);
       closeSettings();
-    } else {
-      console.error('Failed to save settings');
+    } catch (error) {
+      if (error instanceof MissingKeyError) {
+        setGeneralError(error.userMessage);
+      } else if (error instanceof InvalidKeyError) {
+        setGeneralError(error.userMessage);
+      } else {
+        setGeneralError('Unknown configuration error');
+      }
     }
   };
 
@@ -658,6 +686,15 @@ const SettingsModal: React.FC = () => {
             </div>
           )}
         </div>
+
+        {/* Validation error (general) */}
+        {generalError ? (
+          <div style={{ margin: '0 24px 12px' }}>
+            <div style={{ color: '#991b1b', backgroundColor: '#fee2e2', border: '1px solid #fecaca', borderRadius: '6px', padding: '8px 12px' }}>
+              {generalError}
+            </div>
+          </div>
+        ) : null}
 
         {/* Footer */}
         <div style={{

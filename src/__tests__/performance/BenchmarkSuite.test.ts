@@ -6,12 +6,15 @@ import { performance } from 'perf_hooks';
 import GlobalAnalysisOrchestrator from '../../services/coherence/GlobalAnalysisOrchestrator';
 import { BenchmarkHarness } from './BenchmarkHarness';
 import { validateThroughput, validateMemory, validateUI } from './perfThresholds';
-import { TestAIManager } from '../integration/testUtils';
+import { setupRealAIForTesting } from '../integration/testUtils';
 import type { GlobalCoherenceSettings, Manuscript, Scene } from '../../shared/types';
+
+const hasAllAIKeys = Boolean(process.env.CLAUDE_API_KEY && process.env.OPENAI_API_KEY && process.env.GEMINI_API_KEY);
+const suite = hasAllAIKeys ? describe : describe.skip;
 
 // Increase suite timeout to 2 minutes as requested
 
-describe('Performance Benchmarks', () => {
+suite('Performance Benchmarks', () => {
   const harness = new BenchmarkHarness({ warmupRuns: 1, repetitions: 1, reportDir: 'reports/perf', monitorEventLoop: true });
 
   // Utility: minimal settings to avoid heavy passes and any IO
@@ -25,8 +28,8 @@ describe('Performance Benchmarks', () => {
     stopOnCritical: false,
   };
 
-  function buildOrchestrator(latencyMs = 0) {
-    const ai = new TestAIManager({ latencyMs });
+  async function buildOrchestrator(_latencyMs = 0) {
+    const ai = await setupRealAIForTesting();
     const orch = new GlobalAnalysisOrchestrator(ai as any, { enableCache: false, delayBetweenItemsMs: 0 });
     return orch;
   }
@@ -34,8 +37,10 @@ describe('Performance Benchmarks', () => {
 
   // Build per-item operation for "throughput" that analyzes a single transition using orchestrator on two-scene slices
   function perItemTransitionOpFactory(allScenes: Scene[]): (i: number) => Promise<void> {
-    const orch = buildOrchestrator(0);
+    let orchPromise: Promise<GlobalAnalysisOrchestrator> | null = null;
+    const getOrch = () => orchPromise ?? (orchPromise = buildOrchestrator(0));
     return async (i: number) => {
+      const orch = await getOrch();
       const a = allScenes[i % allScenes.length];
       const b = allScenes[(i + 1) % allScenes.length];
       const manuscript: Manuscript = {
@@ -66,14 +71,14 @@ describe('Performance Benchmarks', () => {
   describe('Memory Usage', () => {
     const hasGC = typeof global.gc === 'function';
     if (!hasGC) {
-      // eslint-disable-next-line no-console
+       
       console.warn('[BenchmarkSuite] global.gc not available; run Node with --expose-gc to enable strict leak test');
     }
 
     (hasGC ? test : test.skip)('should not leak memory during repeated operations', async () => {
       const sceneCount = 20;
       const manuscript = await harness.generateManuscript(sceneCount);
-      const orch = buildOrchestrator(0);
+      const orch = await buildOrchestrator(0);
 
       const op = async () => {
         await orch.analyzeGlobalCoherence({ ...manuscript, id: `m-mem-${Date.now()}` }, quickSettings);
@@ -89,7 +94,7 @@ describe('Performance Benchmarks', () => {
     test('should handle 500+ scenes without excessive memory', async () => {
       const sceneCount = 500;
       const manuscript = await harness.generateManuscript(sceneCount);
-      const orch = buildOrchestrator(0);
+      const orch = await buildOrchestrator(0);
 
       const mem = await harness.measureMemory(async () => {
         await orch.analyzeGlobalCoherence(manuscript, quickSettings);
@@ -106,7 +111,7 @@ describe('Performance Benchmarks', () => {
   test('should handle parallel scene analysis', async () => {
     // Use ContinuityAnalyzer for realistic per-scene compute and cache disabled to measure execution
     const { default: ContinuityAnalyzer } = await import('../../renderer/features/analyze/services/ContinuityAnalyzer');
-    const ai = new TestAIManager({ latencyMs: 1 });
+    const ai = await setupRealAIForTesting();
     const analyzer = new ContinuityAnalyzer({ enableCache: false });
 
     const sceneCount = 60;
@@ -155,7 +160,7 @@ describe('Performance Benchmarks', () => {
   // Cache Effectiveness
   test('should improve performance on repeated analysis', async () => {
     const { default: ContinuityAnalyzer } = await import('../../renderer/features/analyze/services/ContinuityAnalyzer');
-    const ai = new TestAIManager({ latencyMs: 0 });
+    const ai = await setupRealAIForTesting();
     const analyzer = new ContinuityAnalyzer({ enableCache: true });
     const sceneCount = 80;
     const manuscript = await harness.generateManuscript(sceneCount);
@@ -185,7 +190,7 @@ describe('Performance Benchmarks', () => {
     const sceneCount = 200;
     const manuscript = await harness.generateManuscript(sceneCount);
     // Add a tiny latency to simulate ongoing work
-    const orch = buildOrchestrator(2);
+    const orch = await buildOrchestrator(2);
 
     let running = true;
     const bg = (async () => {
@@ -242,7 +247,7 @@ describe('Performance Benchmarks', () => {
       } else {
         if (regressions.length > 0) {
           // warn-only in non-CI
-          // eslint-disable-next-line no-console
+           
           console.warn('[BenchmarkSuite] Baseline regressions (non-CI, warn-only):', regressions);
         }
       }

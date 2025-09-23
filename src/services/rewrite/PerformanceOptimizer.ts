@@ -1,5 +1,3 @@
-import type { BatchRewriteProgress } from './RewriteOrchestrator';
-
 export interface PerformanceMetrics {
   avgRewriteTime: number;
   cacheHitRate: number;

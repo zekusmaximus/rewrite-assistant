@@ -7,7 +7,7 @@ const performanceOptimizer = new PerformanceOptimizer();
 
 const RewriteStats: React.FC = () => {
   const manuscript = useManuscriptStore(state => state.manuscript);
-  const { sceneRewrites, batchProgress } = useRewriteStore();
+  const { sceneRewrites } = useRewriteStore();
 
   const stats = React.useMemo(() => {
     if (!manuscript) return null;
