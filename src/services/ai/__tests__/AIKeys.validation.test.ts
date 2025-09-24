@@ -1,6 +1,5 @@
 import { describe, test, expect } from 'vitest';
 import AIServiceManager from '../AIServiceManager';
-import { ProviderError } from '../types';
 import { MissingKeyError, InvalidKeyError } from '../errors/AIServiceErrors';
 import KeyGateTestDouble from '../KeyGate.testdouble';
 
