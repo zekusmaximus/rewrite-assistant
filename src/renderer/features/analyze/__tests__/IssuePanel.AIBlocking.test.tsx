@@ -91,8 +91,8 @@ describe('[typescript.component IssuePanel()](src/renderer/features/analyze/comp
   it('renders configuration prompt when status.available=false and buttons invoke handlers', async () => {
     const user = userEvent.setup();
  
-    // Spy on store.checkStatus before render so component captures the spy
-    const checkSpy = vi.spyOn(useAIStatusStore.getState(), 'checkStatus');
+    // Mock store.checkStatus to prevent it from changing isChecking state
+    const checkSpy = vi.spyOn(useAIStatusStore.getState(), 'checkStatus').mockImplementation(() => Promise.resolve());
  
     render(<IssuePanel isOpen={true} className="" onClose={vi.fn()} />);
  

@@ -9,6 +9,9 @@
  */
 export function redactSecrets(str: string): string {
   if (typeof str !== 'string') {
+    if (str === null || str === undefined) {
+      return '';
+    }
     return String(str);
   }
 
@@ -35,14 +38,13 @@ export function redactSecrets(str: string): string {
   // Apply each pattern
   for (const pattern of patterns) {
     redacted = redacted.replace(pattern, (match) => {
-      // Keep first 4 and last 4 characters for identification, replace middle with asterisks
+      // Keep first 4 and last 4 characters for identification, replace middle with exactly 4 asterisks
       if (match.length <= 8) {
         return '*'.repeat(match.length);
       }
       const prefix = match.substring(0, 4);
       const suffix = match.substring(match.length - 4);
-      const middleLength = match.length - 8;
-      return `${prefix}${'*'.repeat(middleLength)}${suffix}`;
+      return `${prefix}****${suffix}`;
     });
   }
 
@@ -80,6 +82,9 @@ export function redactObjectSecrets(
       )) {
         if (typeof value === 'string') {
           result[key] = redactSecrets(value);
+        } else if (Array.isArray(value)) {
+          // Process array elements individually for sensitive keys
+          result[key] = value.map(item => redactObjectSecrets(item, sensitiveKeys));
         } else {
           result[key] = '[REDACTED]';
         }

@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import AIServiceManager from '../AIServiceManager';
 import { ProviderError } from '../types';
-import { MissingKeyError } from '../errors/AIServiceErrors';
+import { MissingKeyError, InvalidKeyError } from '../errors/AIServiceErrors';
 import KeyGateTestDouble from '../KeyGate.testdouble';
 
 // Minimal fixtures
@@ -59,6 +59,6 @@ describe('AI Keys and Configuration Validation', () => {
     // Replace the KeyGate instance in the manager with our test double
     (manager as any).keyGate = mockGate;
 
-    await expect(manager.analyzeContinuity(req)).rejects.toBeInstanceOf(ProviderError);
+    await expect(manager.analyzeContinuity(req)).rejects.toBeInstanceOf(InvalidKeyError);
   });
 });

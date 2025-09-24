@@ -1,0 +1,82 @@
+{
+  "throughput": {
+    "throughput-10": {
+      "items": 10,
+      "totalTimeMs": 41.94770000000062,
+      "avgMsPerItem": 4.192349999999988,
+      "percentiles": {
+        "p50": 2.0900000000001455,
+        "p95": 21.644999999999527,
+        "p99": 21.644999999999527
+      },
+      "scenesPerSecond": 238.52970291125573
+    },
+    "throughput-50": {
+      "items": 50,
+      "totalTimeMs": 72.13900000000012,
+      "avgMsPerItem": 1.4410679999999956,
+      "percentiles": {
+        "p50": 1.21100000000024,
+        "p95": 2.7346999999999753,
+        "p99": 7.416599999999562
+      },
+      "scenesPerSecond": 693.9297798577188
+    },
+    "throughput-100": {
+      "items": 100,
+      "totalTimeMs": 120.92959999999948,
+      "avgMsPerItem": 1.2078110000000197,
+      "percentiles": {
+        "p50": 0.9754000000002634,
+        "p95": 2.456600000000435,
+        "p99": 6.852599999999256
+      },
+      "scenesPerSecond": 827.944107149201
+    },
+    "throughput-500": {
+      "items": 500,
+      "totalTimeMs": 623.1881999999996,
+      "avgMsPerItem": 1.2444458000000067,
+      "percentiles": {
+        "p50": 0.9915999999993801,
+        "p95": 2.90729999999985,
+        "p99": 4.8419999999996435
+      },
+      "scenesPerSecond": 803.5705532535002
+    }
+  },
+  "memory": {
+    "memory-leak": {
+      "beforeHeap": 25016536,
+      "afterHeap": 25041960,
+      "heapDiff": 25424,
+      "peakHeap": 30481400,
+      "repeats": 6
+    },
+    "memory-500": {
+      "beforeHeap": 30252384,
+      "afterHeap": 32191984,
+      "heapDiff": 1939600,
+      "peakHeap": 42645144,
+      "repeats": 1
+    }
+  },
+  "latency": {
+    "ui": {
+      "samples": 1,
+      "avgMs": 114.1948999999995,
+      "p50": 114.1948999999995,
+      "p95": 114.1948999999995,
+      "p99": 114.1948999999995
+    }
+  },
+  "timestamp": "2025-09-24T13:28:01.724Z",
+  "environment": {
+    "node": "v22.14.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpus": 6,
+    "totalMem": 8389726208,
+    "ci": false
+  }
+}

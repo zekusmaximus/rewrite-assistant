@@ -171,7 +171,11 @@ function IssuePanel(props: IssuePanelProps) {
   // Loading state while AI status is being checked
   if (status.isChecking) {
     return (
-      <div className={['rounded-md border border-gray-300 bg-gray-50 p-4', className].filter(Boolean).join(' ')}>
+      <div 
+        className={['rounded-md border border-gray-300 bg-gray-50 p-4', className].filter(Boolean).join(' ')}
+        role="status"
+        aria-live="polite"
+      >
         <div className="flex items-center gap-3">
           <div className="animate-spin h-5 w-5 border-2 border-gray-400 border-t-transparent rounded-full" />
           <div>
