@@ -1,6 +1,6 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import AIServiceManager from '../services/ai/AIServiceManager';
-import KeyGate from '../services/ai/KeyGate';
+import KeyGateTestDouble from '../services/ai/KeyGate.testdouble';
 import { MissingKeyError, InvalidKeyError } from '../services/ai/errors/AIServiceErrors';
 import { ProviderError } from '../services/ai/types';
 import * as CB from '../services/ai/utils/CircuitBreaker';
@@ -55,7 +55,9 @@ afterEach(() => {
 describe('No-Fallback Policy Validation', () => {
   describe('API Key Removal Tests', () => {
     test('Startup validation fails with no keys', async () => {
-      const gate = new KeyGate();
+      const gate = new KeyGateTestDouble();
+      // Configure empty settings to simulate missing keys
+      gate.setMockSettings({ providers: {} });
       await expect(gate.requireKey('claude', { validate: true })).rejects.toBeInstanceOf(MissingKeyError);
       await expect(gate.requireKey('openai', { validate: true })).rejects.toBeInstanceOf(MissingKeyError);
       await expect(gate.requireKey('gemini', { validate: true })).rejects.toBeInstanceOf(MissingKeyError);
@@ -67,6 +69,9 @@ describe('No-Fallback Policy Validation', () => {
 
     test('Analysis calls fail with no keys', async () => {
       const manager = new AIServiceManager();
+      // Configure with empty settings to simulate no keys scenario
+      manager.configure({});
+
       const req = {
         scene,
         previousScenes,
@@ -100,34 +105,32 @@ describe('No-Fallback Policy Validation', () => {
 
   describe('Service Validation Tests', () => {
     test('Invalid keys are rejected immediately in key validation', async () => {
-      const electronStub = {
-        loadSettings: vi.fn().mockResolvedValue({
-          providers: {
-            claude: { apiKey: 'invalid-key' },
-          },
-        }),
-        testConnection: vi.fn().mockResolvedValue({ success: false, error: 'invalid' }),
-      };
-      (globalThis as any).window = { ...(originalWindow ?? {}), electronAPI: electronStub };
+      const gate = new KeyGateTestDouble();
+      // Configure mock settings and connection result to simulate invalid key
+      gate.setMockSettings({
+        providers: {
+          claude: { apiKey: 'invalid-key' },
+        },
+      });
+      gate.setMockConnectionResult('claude', { success: false, error: 'invalid' });
 
-      const gate = new KeyGate();
       await expect(gate.requireKey('claude', { validate: true })).rejects.toBeInstanceOf(InvalidKeyError);
     });
 
     test('All providers return 503 -> health shows no working provider', async () => {
-      const electronStub = {
-        loadSettings: vi.fn().mockResolvedValue({
-          providers: {
-            claude: { apiKey: 'k1' },
-            openai: { apiKey: 'k2' },
-            gemini: { apiKey: 'k3' },
-          },
-        }),
-        testConnection: vi.fn().mockResolvedValue({ success: false, error: '503 Service Unavailable' }),
-      };
-      (globalThis as any).window = { ...(originalWindow ?? {}), electronAPI: electronStub };
+      const gate = new KeyGateTestDouble();
+      // Configure mock settings and connection results to simulate 503 errors
+      gate.setMockSettings({
+        providers: {
+          claude: { apiKey: 'k1' },
+          openai: { apiKey: 'k2' },
+          gemini: { apiKey: 'k3' },
+        },
+      });
+      gate.setMockConnectionResult('claude', { success: false, error: '503 Service Unavailable' });
+      gate.setMockConnectionResult('openai', { success: false, error: '503 Service Unavailable' });
+      gate.setMockConnectionResult('gemini', { success: false, error: '503 Service Unavailable' });
 
-      const gate = new KeyGate();
       const health = await gate.checkAllProviders();
       expect(health.hasWorkingProvider).toBe(false);
       expect(health.workingProviders).toEqual([]);

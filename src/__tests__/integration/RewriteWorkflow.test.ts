@@ -15,15 +15,12 @@ import RewriteOrchestrator from '../../services/rewrite/RewriteOrchestrator';
 import { useManuscriptStore } from '../../renderer/stores/manuscriptStore';
 import type { Manuscript } from '../../shared/types';
 
-const hasAllAIKeys = Boolean(process.env.CLAUDE_API_KEY && process.env.OPENAI_API_KEY && process.env.GEMINI_API_KEY);
-const suite = hasAllAIKeys ? describe : describe.skip;
+const suite = describe; // Always run tests with test doubles
 
 let ai: any;
-if (hasAllAIKeys) {
-  beforeAll(async () => {
-    ai = await setupRealAIForTesting();
-  });
-}
+beforeAll(async () => {
+  ai = await setupRealAIForTesting();
+});
 
 function currentManuscript(): Manuscript {
   const ms = useManuscriptStore.getState().manuscript;
@@ -164,7 +161,7 @@ suite('Batch Operations', () => {
 
   test('should handle batch rewriting over selected scenes', async () => {
     await loadTestManuscript('medium-manuscript.txt');
-    const ai = await setupRealAIForTesting();
+    // Use the ai instance from beforeAll
     await analyzeManuscript(currentManuscript(), ai, { includeEngagement: false });
 
     // Choose 6 scenes to rewrite

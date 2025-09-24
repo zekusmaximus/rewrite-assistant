@@ -9,8 +9,7 @@ import { validateThroughput, validateMemory, validateUI } from './perfThresholds
 import { setupRealAIForTesting } from '../integration/testUtils';
 import type { GlobalCoherenceSettings, Manuscript, Scene } from '../../shared/types';
 
-const hasAllAIKeys = Boolean(process.env.CLAUDE_API_KEY && process.env.OPENAI_API_KEY && process.env.GEMINI_API_KEY);
-const suite = hasAllAIKeys ? describe : describe.skip;
+const suite = describe; // Always run tests with test doubles
 
 // Increase suite timeout to 2 minutes as requested
 

@@ -18,6 +18,7 @@ import BaseProvider from './providers/BaseProvider';
 import ModelPerformanceTracker from './optimization/ModelPerformanceTracker';
 import KeyGate from './KeyGate';
 import { MissingKeyError, InvalidKeyError } from './errors/AIServiceErrors';
+import { redactObjectSecrets } from '../../shared/security';
 
 /**
  * Model capability registry used for routing and fallbacks.
@@ -377,7 +378,7 @@ export class AIServiceManager {
           throw err;
         }
         // TODO: Replace console.log with production logger
-        console.log(`[AIServiceManager] analyze via ${model} failed:`, err);
+        console.log(`[AIServiceManager] analyze via ${model} failed:`, redactObjectSecrets(err));
         lastError = err;
         this.lastErrors[model] = (err as Error)?.message ?? String(err);
         this.recordFailure(model, this.lastErrors[model]);

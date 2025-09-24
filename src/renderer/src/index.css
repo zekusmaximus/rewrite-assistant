@@ -30,3 +30,20 @@ body {
   background: #a8a8a8;
 }
 
+
+@keyframes slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.animate-slide-in {
+  animation: slide-in 250ms ease-out;
+}
+.animate-fade-out {
+  animation: fade-out 200ms ease-in forwards;
+}

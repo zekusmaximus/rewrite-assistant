@@ -15,7 +15,11 @@ export default abstract class BaseDetector<TTarget = unknown> {
     | 'plot'
     | 'engagement';
 
-  private keyGate = new KeyGate();
+  protected keyGate: KeyGate;
+
+  constructor(keyGate?: KeyGate) {
+    this.keyGate = keyGate || new KeyGate();
+  }
 
   /**
    * AI-only detection path with centralized KeyGate validation.

@@ -11,6 +11,7 @@ import { validateAndNormalize } from '../utils/ResponseValidator';
 import { buildClaudePrompt } from '../prompts/ClaudePrompts';
 import { estimateMessageTokens, estimateTokensForModel } from '../utils/Tokenizers';
 import { estimateCost as estimateUsdCost } from '../optimization/Pricing';
+import { redactObjectSecrets } from '../../../shared/security';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 
@@ -151,7 +152,7 @@ export class ClaudeProvider extends BaseProvider<ClaudeConfig> {
       return out;
     } catch (err) {
       // TODO: Replace with production logger
-      console.log('[ClaudeProvider] analyze error:', err);
+      console.log('[ClaudeProvider] analyze error:', redactObjectSecrets(err));
       if (err instanceof ValidationError) {
         throw err;
       }

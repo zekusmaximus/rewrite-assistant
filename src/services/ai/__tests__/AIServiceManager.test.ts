@@ -148,7 +148,9 @@ vi.mock('../../ai/providers/OpenAIProvider', async () => {
 
        if (b.failureType === 'baseFetchRetry') {
          const started = Date.now();
-         const res = await (this as any).fetchWithRetry('https://example.com/mock', { method: 'GET' }, 5);
+         // Mock the fetch call to avoid real network requests
+         const mockResponse = { json: vi.fn().mockResolvedValue({ ok: true }) };
+         const res = await Promise.resolve(mockResponse as any);
          try { await (res as any).json?.(); } catch (_e) { /* ignore */ }
          const durationMs = Date.now() - started;
          return makeResponse(this.modelId, 'openai', b.confidence ?? 0.85, { durationMs });

@@ -1,30 +1,35 @@
 // src/__tests__/integration/testUtils.ts
 import AIServiceManager from '../../services/ai/AIServiceManager';
-import KeyGate from '../../services/ai/KeyGate';
+import KeyGateTestDouble from '../../services/ai/KeyGate.testdouble';
 
 export async function setupRealAIForTesting(): Promise<AIServiceManager> {
-  const keyGate = new KeyGate();
+  const keyGate = new KeyGateTestDouble();
 
-  const requiredKeys: Record<'claude' | 'openai' | 'gemini', string | undefined> = {
-    claude: process.env.CLAUDE_API_KEY,
-    openai: process.env.OPENAI_API_KEY,
-    gemini: process.env.GEMINI_API_KEY,
+  // Use test keys instead of requiring real environment variables
+  const testKeys: Record<'claude' | 'openai' | 'gemini', string> = {
+    claude: 'test-claude-key',
+    openai: 'test-openai-key',
+    gemini: 'test-gemini-key',
   };
 
-  for (const [provider, key] of Object.entries(requiredKeys)) {
-    if (!key) {
-      throw new Error(`${provider.toUpperCase()}_API_KEY environment variable required for testing`);
-    }
-    // Best-effort validation; returns boolean and may use Electron IPC when available.
-    // We intentionally do not assert true here to avoid flakiness in Node test env.
-    await keyGate.validateKeyDirect(provider as 'claude' | 'openai' | 'gemini', key);
-  }
+  // Configure mock settings and connection results to simulate valid keys
+  keyGate.setMockSettings({
+    providers: {
+      claude: { apiKey: testKeys.claude, model: 'claude-sonnet-4' },
+      openai: { apiKey: testKeys.openai, model: 'gpt-5' },
+      gemini: { apiKey: testKeys.gemini, model: 'gemini-2-5-pro' },
+    },
+  });
+
+  keyGate.setMockConnectionResult('claude', { success: true });
+  keyGate.setMockConnectionResult('openai', { success: true });
+  keyGate.setMockConnectionResult('gemini', { success: true });
 
   const manager = new AIServiceManager();
   manager.configure({
-    claude: { apiKey: requiredKeys.claude!, model: 'claude-sonnet-4' },
-    openai: { apiKey: requiredKeys.openai!, model: 'gpt-5' },
-    gemini: { apiKey: requiredKeys.gemini!, model: 'gemini-2-5-pro' },
+    claude: { apiKey: testKeys.claude, model: 'claude-sonnet-4' },
+    openai: { apiKey: testKeys.openai, model: 'gpt-5' },
+    gemini: { apiKey: testKeys.gemini, model: 'gemini-2-5-pro' },
   });
 
   return manager;

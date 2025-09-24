@@ -6,7 +6,7 @@ import CharacterDetector from '../detectors/CharacterDetector';
 import PlotContextDetector from '../detectors/PlotContextDetector';
 import EngagementDetector from '../detectors/EngagementDetector';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
-import KeyGate from '../../../../services/ai/KeyGate';
+import KeyGateTestDouble from '../../../../services/ai/KeyGate.testdouble';
 import { ValidationPipeline } from '../../../../services/ai/validation/ValidationPipeline';
 
 type AnalyzeReq = Parameters<AIServiceManager['analyzeContinuity']>[0];
@@ -73,16 +73,23 @@ function makeManagerStub(recorded: AnalyzeReq[]) {
 }
 
 describe('Detector integration - AnalysisRequest enrichment and consensus adapter', () => {
+  let mockKeyGate: KeyGateTestDouble;
+
   beforeEach(() => {
     vi.restoreAllMocks();
-    // Unit tests should not require real keys; stub KeyGate validation
-    vi.spyOn(KeyGate.prototype, 'requireKey').mockResolvedValue('test-key');
+    mockKeyGate = new KeyGateTestDouble();
+    mockKeyGate.setMockSettings({
+      providers: {
+        claude: { apiKey: 'test-claude-key', model: 'claude-3-sonnet' }
+      }
+    });
+    mockKeyGate.setMockConnectionResult('claude', { success: true });
   });
 
   it('non-critical pronoun request: single analyze call with enriched fields', async () => {
     const calls: AnalyzeReq[] = [];
     const manager = makeManagerStub(calls);
-    const det = new PronounDetector();
+    const det = new PronounDetector(mockKeyGate);
 
     const scene = buildScene({ position: 7 } as any); // no critical flag
     const prev = buildPrev(3);
@@ -119,7 +126,7 @@ describe('Detector integration - AnalysisRequest enrichment and consensus adapte
   it('critical pronoun request: consensus path calls analyze twice with distinct modelId', async () => {
     const calls: AnalyzeReq[] = [];
     const manager = makeManagerStub(calls);
-    const det = new PronounDetector();
+    const det = new PronounDetector(mockKeyGate);
 
     const scene = buildScene({ position: 4 } as any);
     (scene as any).critical = true; // signal critical
@@ -148,7 +155,7 @@ describe('Detector integration - AnalysisRequest enrichment and consensus adapte
   it('timeline detector honors enrichment and consensus flags', async () => {
     const calls: AnalyzeReq[] = [];
     const manager = makeManagerStub(calls);
-    const det = new TimelineDetector();
+    const det = new TimelineDetector(mockKeyGate);
 
     // Provide clear temporal markers so localDetection will produce targets (and trigger AI)
     const scene = buildScene({
@@ -168,7 +175,7 @@ describe('Detector integration - AnalysisRequest enrichment and consensus adapte
   it('character detector single-run when not critical', async () => {
     const calls: AnalyzeReq[] = [];
     const manager = makeManagerStub(calls);
-    const det = new CharacterDetector();
+    const det = new CharacterDetector(mockKeyGate);
 
     const scene = buildScene({ text: 'Eve met Mallory. "Sis," she said.' } as any);
     const prev = buildPrev(2);
@@ -188,8 +195,8 @@ describe('Detector integration - AnalysisRequest enrichment and consensus adapte
     const managerPlot = makeManagerStub(callsPlot);
     const managerEng = makeManagerStub(callsEng);
 
-    const plot = new PlotContextDetector();
-    const engage = new EngagementDetector();
+    const plot = new PlotContextDetector(mockKeyGate);
+    const engage = new EngagementDetector(mockKeyGate);
 
     const scenePlot = buildScene({ text: 'The incident shocked the town. What happened would change everything.' } as any);
     const sceneEng = buildScene({ text: 'It was the best of times, it was the worst of times. Dialogue starts. "Hello."' } as any);

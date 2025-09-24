@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import './index.css';
+import { AIServiceErrorBoundary } from '../components/error-boundaries';
 
 const container = document.getElementById('root');
 if (!container) {
@@ -9,5 +10,12 @@ if (!container) {
 }
 
 const root = createRoot(container);
-root.render(<App />);
+
+// Ensure the toast container mounts at root level properly even when children are remounted.
+// The boundary will remount subtree on recovery via a key bump.
+root.render(
+  <AIServiceErrorBoundary feature="root">
+    <App />
+  </AIServiceErrorBoundary>
+);
 

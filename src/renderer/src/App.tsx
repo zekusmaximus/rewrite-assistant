@@ -17,6 +17,7 @@ import { useGlobalCoherenceStore } from '../features/coherence/stores/globalCohe
 
 import { useAIStatusStore } from '../stores/aiStatusStore';
  
+import { ToastContainer } from '../components/toast';
 const App: React.FC = () => {
   const { 
     manuscript, 
@@ -449,6 +450,7 @@ const App: React.FC = () => {
       )}
       {/* Floating Global Coherence progress indicator */}
       <GlobalCoherenceProgress />
+      <ToastContainer />
     </div>
   );
 };

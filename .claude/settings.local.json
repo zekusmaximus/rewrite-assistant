@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node:*)",
+      "Bash(npm:*)",
+      "Bash(Get-Date -Format \"yyyy-MM-dd HH:mm:ss\")",
+      "Bash(Test-Path \"package-lock.json\")",
+      "Bash(Test-Path \"node_modules\")",
+      "Bash(npx:*)",
+      "Bash(unset NODE_ENV CI npm_config_production npm_config_only npm_config_omit)",
+      "Bash(export NODE_ENV=development)",
+      "Bash(echo:*)",
+      "Bash(rm:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

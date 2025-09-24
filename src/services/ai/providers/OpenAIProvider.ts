@@ -11,6 +11,7 @@ import { validateAndNormalize } from '../utils/ResponseValidator';
 import { buildOpenAIPrompt, getOpenAIResponseFormat } from '../prompts/OpenAIPrompts';
 import { estimateMessageTokens, estimateTokensForModel } from '../utils/Tokenizers';
 import { estimateCost as estimateUsdCost } from '../optimization/Pricing';
+import { redactObjectSecrets } from '../../../shared/security';
 
 
 /**
@@ -143,7 +144,7 @@ export class OpenAIProvider extends BaseProvider<OpenAIConfig> {
       return out;
     } catch (err) {
       // TODO: Replace with production logger
-      console.log('[OpenAIProvider] analyze error:', err);
+      console.log('[OpenAIProvider] analyze error:', redactObjectSecrets(err));
       if (err instanceof ValidationError) {
         throw err;
       }

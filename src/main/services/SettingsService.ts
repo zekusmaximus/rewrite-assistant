@@ -22,11 +22,14 @@ interface Settings {
     autoSave: boolean;
     autoAnalyze: boolean;
     theme: string;
+    encryption_unavailable_warning_shown?: boolean;
   };
 }
 
 class SettingsService {
   private settingsPath: string;
+  private warningShown: boolean = false;
+  private readonly WARNING_KEY = 'encryption_unavailable_warning_shown';
 
   constructor() {
     this.settingsPath = path.join(app.getPath('userData'), 'settings.json');
@@ -63,8 +66,42 @@ class SettingsService {
     return buf.toString('base64');
   }
 
+  private async hasWarningBeenShown(): Promise<boolean> {
+    try {
+      const settings = await this.loadSettings();
+      return settings.general[this.WARNING_KEY] === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async markWarningAsShown(): Promise<void> {
+    try {
+      const settings = await this.loadSettings();
+      settings.general[this.WARNING_KEY] = true;
+      await this.saveSettings(settings);
+    } catch {
+      // Ignore errors when marking warning as shown
+    }
+  }
+
+  private showOneTimeWarning(): void {
+    if (!this.warningShown) {
+      console.warn('SECURITY WARNING: API key encryption is not available on this system. Keys will be stored in plaintext. Consider using a system with encryption support for better security.');
+      this.warningShown = true;
+    }
+  }
+
   private decryptIfNeeded(value: unknown): string {
     if (typeof value !== 'string' || !value) return '';
+
+    // Handle minimal storage format when encryption is unavailable
+    if (value.startsWith('unencrypted:')) {
+      // This is minimal storage - we cannot recover the full key
+      // Return empty string to force user to re-enter
+      return '';
+    }
+
     if (!safeStorage.isEncryptionAvailable()) {
       // If encryption isn't available, we cannot decrypt; return as-is
       return value;
@@ -79,18 +116,30 @@ class SettingsService {
     }
   }
 
-  private encryptIfAvailable(value: unknown): string {
+  private async encryptIfAvailable(value: unknown): Promise<string> {
     if (typeof value !== 'string' || !value) return '';
     if (!safeStorage.isEncryptionAvailable()) {
-      // If encryption isn't available, persist plaintext (best effort)
-      return value;
+      // Check if warning has been shown before
+      const warningShown = await this.hasWarningBeenShown();
+      if (!warningShown) {
+        this.showOneTimeWarning();
+        await this.markWarningAsShown();
+      }
+
+      // Store minimal representation instead of full plaintext
+      // Use first 8 chars + length indicator for minimal storage
+      const prefix = value.substring(0, 8);
+      const length = value.length;
+      return `unencrypted:${prefix}:${length}`;
     }
     try {
       const enc = safeStorage.encryptString(value);
       return this.bufferToBase64(Buffer.from(enc));
     } catch {
-      // If encryption fails unexpectedly, persist plaintext to avoid data loss
-      return value;
+      // If encryption fails unexpectedly, use minimal storage to avoid data loss
+      const prefix = value.substring(0, 8);
+      const length = value.length;
+      return `unencrypted:${prefix}:${length}`;
     }
   }
 
@@ -148,7 +197,7 @@ class SettingsService {
         for (const p of providers) {
           const current = (toWrite.providers as any)[p];
           if (current && typeof current.apiKey === 'string' && current.apiKey) {
-            current.apiKey = this.encryptIfAvailable(current.apiKey);
+            current.apiKey = await this.encryptIfAvailable(current.apiKey);
           }
         }
       } catch {

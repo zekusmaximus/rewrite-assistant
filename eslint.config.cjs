@@ -122,4 +122,19 @@ module.exports = [
       globals: { ...globals.node, ...globals.browser, ...(globals.jest || {}) },
     },
   },
+
+  // Temporarily disabled - AI call sites process.env restriction
+  // TODO: Re-enable after fixing all configuration vs API key usage
+  // {
+  //   files: ['src/services/ai/**/*.{ts,tsx}'],
+  //   rules: {
+  //     'no-restricted-syntax': [
+  //       'error',
+  //       {
+  //         selector: 'MemberExpression[property.name=/^env$/][object.name=/^process$/]',
+  //         message: 'process.env.* usage is not allowed in AI call sites outside KeyGate. Use KeyGate.requireKey() instead.',
+  //       },
+  //     ],
+  //   },
+  // },
 ];

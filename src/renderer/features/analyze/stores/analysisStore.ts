@@ -4,6 +4,7 @@ import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import ContinuityAnalyzer from '../services/ContinuityAnalyzer';
 import AIServiceManager from '../../../../services/ai/AIServiceManager';
 import { MissingKeyError, InvalidKeyError } from '../../../../services/ai/errors/AIServiceErrors';
+import { toast } from '../../../stores/toastStore';
  
 /**
  * Local analysis stage indicator for UI and orchestration.
@@ -161,6 +162,13 @@ const useAnalysisStore = create<AnalysisState>((set, get) => ({
       return;
     }
 
+    // Notify user that analysis is starting
+    try {
+      toast.info('Analysis Started', 'This may take a few moments');
+    } catch {
+      // ignore toast errors
+    }
+
     // Initialize batch progress
     set((state) => ({
       ...state,
@@ -197,6 +205,21 @@ const useAnalysisStore = create<AnalysisState>((set, get) => ({
         stage: 'finalizing',
       },
     }));
+
+    // Summarize results
+    try {
+      const analyses = get().analyses;
+      const ids = moved.map((s) => s.id);
+      let issueCount = 0;
+      for (const id of ids) {
+        const res: any = analyses.get(id);
+        const len = Array.isArray(res?.issues) ? res.issues.length : 0;
+        issueCount += len;
+      }
+      toast.success('Analysis Complete', `Found ${issueCount} issues`);
+    } catch {
+      // ignore toast errors
+    }
   },
 
   /**
@@ -274,6 +297,12 @@ const useAnalysisStore = create<AnalysisState>((set, get) => ({
           progress: { ...state.progress, stage: 'ai-validation' },
           errorMessage: err instanceof Error ? err.message : String(err),
         }));
+        try {
+          const msg = (err as any)?.userMessage ?? (err as Error)?.message ?? 'Configuration required';
+          toast.error('Analysis Failed', msg);
+        } catch {
+          // ignore toast errors
+        }
         throw err;
       }
       set((state) => ({
@@ -282,6 +311,19 @@ const useAnalysisStore = create<AnalysisState>((set, get) => ({
         progress: { ...state.progress, stage: 'ai-validation' },
         errorMessage: err instanceof Error ? err.message : String(err),
       }));
+
+      // Classify and surface error
+      try {
+        const message = (err as any)?.message ?? '';
+        const isNetwork = err instanceof TypeError || (typeof message === 'string' && message.includes('Failed to fetch'));
+        if (isNetwork) {
+          toast.error('Network Error', 'Check your connection');
+        } else {
+          toast.error('Analysis Failed', message || 'An unexpected error occurred');
+        }
+      } catch {
+        // ignore toast errors
+      }
       return;
     } finally {
       // Ensure correct analyzing flag based on whether we're in a batch

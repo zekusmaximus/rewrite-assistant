@@ -280,7 +280,6 @@ function registerAIStatusIPC(): void {
 if (process.platform === 'win32') {
   try {
     // Optional in dev; present in production on Windows. If missing, ignore.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     if (require('electron-squirrel-startup')) {
       app.quit();
       // Do not continue starting the app when handling Squirrel events.

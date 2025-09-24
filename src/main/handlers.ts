@@ -11,6 +11,7 @@ import AnalysisCache from '../services/cache/AnalysisCache';
 import ManuscriptExporter, { ExportOptions } from '../services/export/ManuscriptExporter';
 import settingsService from './services/SettingsService';
 import { registerGlobalCoherenceHandlers } from './handlers/globalCoherence';
+import { redactObjectSecrets } from '../shared/security';
  
 // AI service manager singleton and helpers
 /**
@@ -222,7 +223,7 @@ export function setupIPCHandlers(): void {
       
       return manuscript;
     } catch (error) {
-      console.error('Error loading file:', error);
+      console.error('Error loading file:', redactObjectSecrets(error));
       throw error;
     }
   });
@@ -240,7 +241,7 @@ export function setupIPCHandlers(): void {
       
       return manuscript;
     } catch (error) {
-      console.error('Error loading specific file:', error);
+      console.error('Error loading specific file:', redactObjectSecrets(error));
       throw error;
     }
   });
@@ -284,7 +285,7 @@ export function setupIPCHandlers(): void {
 
       return manuscript;
     } catch (error) {
-      console.error('Error auto-loading manuscript:', error);
+      console.error('Error auto-loading manuscript:', redactObjectSecrets(error));
       return null; // Don't throw for auto-load failures
     }
   });
@@ -312,7 +313,7 @@ export function setupIPCHandlers(): void {
       
       return result.filePath;
     } catch (error) {
-      console.error('Error saving file:', error);
+      console.error('Error saving file:', redactObjectSecrets(error));
       throw error;
     }
   });
@@ -378,7 +379,7 @@ export function setupIPCHandlers(): void {
       return result;
       
     } catch (error) {
-      console.error('[Handlers] Export error:', error);
+      console.error('[Handlers] Export error:', redactObjectSecrets(error));
       return toErrorResponse(error, 'EXPORT_ERROR');
     }
   });
@@ -422,7 +423,7 @@ export function setupIPCHandlers(): void {
       console.log('[IPC][CONFIGURE_AI_PROVIDER] Providers configured:', Object.keys(cfg));
       return { ok: true };
     } catch (err) {
-      console.warn('[IPC][CONFIGURE_AI_PROVIDER] configure failed:', err);
+      console.warn('[IPC][CONFIGURE_AI_PROVIDER] configure failed:', redactObjectSecrets(err));
       return toErrorResponse(err, 'CONFIGURE_FAILED');
     }
   });
@@ -489,7 +490,7 @@ export function setupIPCHandlers(): void {
       const res = await aiManager.analyzeContinuity(req);
       return res;
     } catch (err) {
-      console.warn('[IPC][ANALYZE_CONTINUITY] analyze failed:', err);
+      console.warn('[IPC][ANALYZE_CONTINUITY] analyze failed:', redactObjectSecrets(err));
       const base = toErrorResponse(err, 'ANALYZE_FAILED');
       return { ...base, metadata: { providerState: aiManager.getMetrics().lastErrors } };
     }
@@ -594,7 +595,7 @@ export function setupIPCHandlers(): void {
 
       return result;
     } catch (error) {
-      console.error('[Handlers] Rewrite generation error:', error);
+      console.error('[Handlers] Rewrite generation error:', redactObjectSecrets(error));
       // Keep existing error-to-response mapping utility
       return toErrorResponse(error, 'REWRITE_GENERATION_ERROR');
     }
@@ -605,7 +606,7 @@ export function setupIPCHandlers(): void {
     try {
       return aiManager.getMetrics();
     } catch (err) {
-      console.warn('[IPC][GET_ANALYSIS_STATUS] metrics failed:', err);
+      console.warn('[IPC][GET_ANALYSIS_STATUS] metrics failed:', redactObjectSecrets(err));
       return toErrorResponse(err, 'STATUS_FAILED');
     }
   });
@@ -631,7 +632,7 @@ export function setupIPCHandlers(): void {
     try {
       return await settingsService.loadSettings();
     } catch (error: unknown) {
-      console.error('[Handlers] Settings load error:', error);
+      console.error('[Handlers] Settings load error:', redactObjectSecrets(error));
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   });
@@ -640,7 +641,7 @@ export function setupIPCHandlers(): void {
     try {
       return await settingsService.saveSettings(settings);
     } catch (error: unknown) {
-      console.error('[Handlers] Settings save error:', error);
+      console.error('[Handlers] Settings save error:', redactObjectSecrets(error));
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   });
@@ -649,7 +650,7 @@ export function setupIPCHandlers(): void {
     try {
       return await settingsService.testConnection(provider, config);
     } catch (error: unknown) {
-      console.error('[Handlers] Connection test error:', error);
+      console.error('[Handlers] Connection test error:', redactObjectSecrets(error));
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   });

@@ -1,6 +1,7 @@
-import { defineConfig } from 'vitest/config';
+// @ts-expect-error - vitest/config types may not be properly resolved
+const { defineConfig } = require('vitest/config');
 
-export default defineConfig({
+module.exports = defineConfig({
   test: {
     environment: 'node',
     include: [
@@ -14,16 +15,30 @@ export default defineConfig({
     clearMocks: true,
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'text-summary', 'html', 'lcov'],
-      reportsDirectory: './coverage',
-      all: false,
-      include: ['src/services/ai/AIServiceManager.ts'],
-      exclude: ['src/**/__tests__/**', 'src/**/types.ts'],
+      reporter: ['text', 'json', 'html'],
+      exclude: [
+        'node_modules/**',
+        'dist/**',
+        'build/**',
+        'coverage/**',
+        'out/**',
+        '.vite/',
+        '.qodo/',
+        '**/*.d.ts',
+        '**/*.config.{js,cjs,ts,mjs}',
+        'vite.*.config.{ts,js,cjs,mjs}',
+        'electron-forge.*.{js,ts,cjs,mjs}',
+        '**/__tests__/**',
+        '**/*.test.{ts,tsx}',
+        '**/*.spec.{ts,tsx}',
+      ],
       thresholds: {
-        lines: 90,
-        functions: 90,
-        branches: 80,
-        statements: 90,
+        global: {
+          branches: 80,
+          functions: 80,
+          lines: 80,
+          statements: 80,
+        },
       },
     },
   },

@@ -21,6 +21,7 @@
 import { create } from 'zustand';
 import type { ProviderName } from '../../services/ai/types';
 import type { AIStatus } from '../../shared/types/ai';
+import { toast } from './toastStore';
 
 /**
  * Error thrown when AI usage is required but services are unavailable.
@@ -370,3 +371,35 @@ export const useAIStatusStore = create<AIStatusStore>((set, get) => ({
     }
   },
 }));
+
+// Toast notifications for AI status transitions (guarded to avoid duplicate subscriptions in HMR)
+try {
+  const g: any = globalThis as any;
+  if (!g.__aiStatusToastSub) {
+    let prev = useAIStatusStore.getState().status;
+    g.__aiStatusToastSub = useAIStatusStore.subscribe((state) => {
+      const next = state.status;
+      try {
+        // Activation transition: available false -> true
+        if (!prev.available && next.available) {
+          const n = Array.isArray(next.workingProviders) ? next.workingProviders.length : 0;
+          if (n > 0) {
+            toast.success('AI Services Activated', `${n} provider(s) available`);
+          } else {
+            toast.success('AI Services Active', 'All features are now available');
+          }
+        }
+        // Degraded/unavailable: available true -> false OR configuration newly required
+        else if ((prev.available && !next.available) || (!prev.needsConfiguration && next.needsConfiguration)) {
+          toast.warning('AI Services Degraded', 'Some features may be unavailable');
+        }
+      } catch {
+        // ignore toast errors
+      } finally {
+        prev = next;
+      }
+    });
+  }
+} catch {
+  // ignore subscription wiring errors
+}

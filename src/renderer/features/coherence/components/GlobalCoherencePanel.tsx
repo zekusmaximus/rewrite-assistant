@@ -9,6 +9,7 @@ import type {
 import { useAIStatusStore } from '../../../stores/aiStatusStore';
 import { useSettingsStore } from '../../settings/stores/useSettingsStore';
 
+import { AIServiceErrorBoundary } from '../../../components/error-boundaries';
 const PASS_LABELS: Record<GlobalCoherenceProgress['currentPass'], string> = {
   transitions: 'Scene Transitions',
   sequences: 'Sequence Coherence',
@@ -180,239 +181,234 @@ export const GlobalCoherencePanel: React.FC = () => {
     };
   }, [lastAnalysis]);
 
-  // Loading state while AI status is being checked
-  if (status.isChecking) {
-    return (
-      <div className={['rounded-md border border-gray-300 bg-gray-50 p-4'].join(' ')}>
-        <div className="flex items-center gap-3">
-          <div className="animate-spin h-5 w-5 border-2 border-gray-400 border-t-transparent rounded-full" />
-          <div>
-            <div className="font-semibold text-gray-900">Checking AI Services...</div>
-            <div className="text-sm text-gray-600 mt-1">Verifying API keys and provider availability</div>
+  // Render within AI error boundary to capture provider/network errors
+  return (
+    <AIServiceErrorBoundary feature="coherence">
+      {status.isChecking ? (
+        <div className={['rounded-md border border-gray-300 bg-gray-50 p-4'].join(' ')}>
+          <div className="flex items-center gap-3">
+            <div className="animate-spin h-5 w-5 border-2 border-gray-400 border-t-transparent rounded-full" />
+            <div>
+              <div className="font-semibold text-gray-900">Checking AI Services...</div>
+              <div className="text-sm text-gray-600 mt-1">Verifying API keys and provider availability</div>
+            </div>
           </div>
         </div>
-      </div>
-    );
-  }
-
-  // Block all analysis functionality when AI is unavailable
-  if (!status.isChecking && !status.available) {
-    return (
-      <div
-        className={['rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-900'].join(' ')}
-        role="status"
-        aria-live="polite"
-        title={status.lastChecked ? `Last checked: ${new Date(status.lastChecked).toLocaleString()}` : undefined}
-      >
-        <div className="mb-2">
-          <h3 className="font-semibold text-amber-900">AI Required: Global Coherence Analysis</h3>
-        </div>
-        <p className="mb-3">This feature needs at least one working AI provider. Add or fix your API keys in Settings.</p>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => {
-              if (typeof openSettings === 'function') {
-                openSettings();
-              } else {
-                const storeAny = useSettingsStore as unknown as { getState?: () => any };
-                const state = storeAny?.getState?.();
-                if (typeof state?.setIsOpen === 'function') {
-                  state.setIsOpen(true);
-                } else if (typeof state?.setIsSettingsOpen === 'function') {
-                  state.setIsSettingsOpen(true);
-                } else {
-                  console.warn('[GlobalCoherencePanel] No settings open handler available.');
-                }
-              }
-            }}
-            className="text-amber-800 underline decoration-amber-400 hover:text-amber-900"
-            aria-label="Open Settings"
-          >
-            Open Settings
-          </button>
-          <button
-            type="button"
-            onClick={() => { void checkStatus(); }}
-            className="px-2 py-1 rounded-md border border-amber-300 text-amber-800 hover:bg-amber-100"
-            aria-label="Refresh AI status"
-          >
-            Refresh Status
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/40">
-      {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700">
-        <button
-          type="button"
-          onClick={toggleExpanded}
-          className="flex items-center gap-2 text-left"
-          aria-expanded={expanded}
-          aria-label={expanded ? 'Collapse Global Coherence panel' : 'Expand Global Coherence panel'}
+      ) : !status.available ? (
+        <div
+          className={['rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-900'].join(' ')}
+          role="status"
+          aria-live="polite"
+          title={status.lastChecked ? `Last checked: ${new Date(status.lastChecked).toLocaleString()}` : undefined}
         >
-          <span aria-hidden="true" className="text-gray-600 dark:text-gray-300">
-            {expanded ? '▼' : '▶'}
-          </span>
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-            Global Coherence
-          </h2>
-        </button>
-
-        <div className="flex items-center gap-2">
-          {!isAnalyzing ? (
+          <div className="mb-2">
+            <h3 className="font-semibold text-amber-900">AI Required: Global Coherence Analysis</h3>
+          </div>
+          <p className="mb-3">This feature needs at least one working AI provider. Add or fix your API keys in Settings.</p>
+          <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={handleAnalyze}
-              disabled={!manuscript}
-              className="text-xs px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
-              aria-label={`Analyze global coherence (estimated cost ${formatUSD(costEstimate)})`}
+              onClick={() => {
+                if (typeof openSettings === 'function') {
+                  openSettings();
+                } else {
+                  const storeAny = useSettingsStore as unknown as { getState?: () => any };
+                  const state = storeAny?.getState?.();
+                  if (typeof state?.setIsOpen === 'function') {
+                    state.setIsOpen(true);
+                  } else if (typeof state?.setIsSettingsOpen === 'function') {
+                    state.setIsSettingsOpen(true);
+                  } else {
+                    console.warn('[GlobalCoherencePanel] No settings open handler available.');
+                  }
+                }
+              }}
+              className="text-amber-800 underline decoration-amber-400 hover:text-amber-900"
+              aria-label="Open Settings"
             >
-              Analyze ({formatUSD(costEstimate)})
+              Open Settings
             </button>
-          ) : (
             <button
               type="button"
-              onClick={handleCancel}
-              className="text-xs px-3 py-1.5 rounded-md bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-700"
-              aria-label="Cancel global coherence analysis"
+              onClick={() => { void checkStatus(); }}
+              className="px-2 py-1 rounded-md border border-amber-300 text-amber-800 hover:bg-amber-100"
+              aria-label="Refresh AI status"
             >
-              Cancel
+              Refresh Status
             </button>
-          )}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/40">
+          {/* Header */}
+          <div className="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={toggleExpanded}
+              className="flex items-center gap-2 text-left"
+              aria-expanded={expanded}
+              aria-label={expanded ? 'Collapse Global Coherence panel' : 'Expand Global Coherence panel'}
+            >
+              <span aria-hidden="true" className="text-gray-600 dark:text-gray-300">
+                {expanded ? '▼' : '▶'}
+              </span>
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Global Coherence
+              </h2>
+            </button>
 
-      {expanded && (
-        <div className="p-3 space-y-4">
-          {/* Settings: Pass selection */}
-          <div>
-            <div className="text-xs text-gray-700 dark:text-gray-300 font-medium mb-2">Passes</div>
-            <div className="grid grid-cols-2 gap-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={localSettings.enableTransitions}
-                  onChange={(e) => handleSettingChange({ enableTransitions: e.target.checked })}
-                />
-                <span>Transitions</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={localSettings.enableSequences}
-                  onChange={(e) => handleSettingChange({ enableSequences: e.target.checked })}
-                />
-                <span>Sequences</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={localSettings.enableChapters}
-                  onChange={(e) => handleSettingChange({ enableChapters: e.target.checked })}
-                />
-                <span>Chapters</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={localSettings.enableArc}
-                  onChange={(e) => handleSettingChange({ enableArc: e.target.checked })}
-                />
-                <span>Narrative Arc</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={localSettings.enableSynthesis}
-                  onChange={(e) => handleSettingChange({ enableSynthesis: e.target.checked })}
-                />
-                <span>Synthesis</span>
-              </label>
+            <div className="flex items-center gap-2">
+              {!isAnalyzing ? (
+                <button
+                  type="button"
+                  onClick={handleAnalyze}
+                  disabled={!manuscript}
+                  className="text-xs px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                  aria-label={`Analyze global coherence (estimated cost ${formatUSD(costEstimate)})`}
+                >
+                  Analyze ({formatUSD(costEstimate)})
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="text-xs px-3 py-1.5 rounded-md bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-700"
+                  aria-label="Cancel global coherence analysis"
+                >
+                  Cancel
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Depth selection */}
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-700 dark:text-gray-300">Depth</label>
-            <select
-              value={localSettings.depth}
-              onChange={(e) =>
-                handleSettingChange({ depth: e.target.value as GlobalCoherenceSettings['depth'] })
-              }
-              className="text-sm border border-gray-300 dark:border-gray-700 rounded-md px-2 py-1 bg-white dark:bg-gray-900"
-              aria-label="Select analysis depth"
-            >
-              <option value="quick">Quick</option>
-              <option value="standard">Standard</option>
-              <option value="thorough">Thorough</option>
-            </select>
-          </div>
+          {expanded && (
+            <div className="p-3 space-y-4">
+              {/* Settings: Pass selection */}
+              <div>
+                <div className="text-xs text-gray-700 dark:text-gray-300 font-medium mb-2">Passes</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.enableTransitions}
+                      onChange={(e) => handleSettingChange({ enableTransitions: e.target.checked })}
+                    />
+                    <span>Transitions</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.enableSequences}
+                      onChange={(e) => handleSettingChange({ enableSequences: e.target.checked })}
+                    />
+                    <span>Sequences</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.enableChapters}
+                      onChange={(e) => handleSettingChange({ enableChapters: e.target.checked })}
+                    />
+                    <span>Chapters</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.enableArc}
+                      onChange={(e) => handleSettingChange({ enableArc: e.target.checked })}
+                    />
+                    <span>Narrative Arc</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.enableSynthesis}
+                      onChange={(e) => handleSettingChange({ enableSynthesis: e.target.checked })}
+                    />
+                    <span>Synthesis</span>
+                  </label>
+                </div>
+              </div>
 
-          {/* Progress UI while analyzing */}
-          {isAnalyzing && progress ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs text-gray-700 dark:text-gray-300">
-                <div>
-                  {passLabel} — Pass {progress.passNumber} / {progress.totalPasses}
-                </div>
-                <div>
-                  {progress.scenesAnalyzed} / {progress.totalScenes} scenes
-                </div>
+              {/* Depth selection */}
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-700 dark:text-gray-300">Depth</label>
+                <select
+                  value={localSettings.depth}
+                  onChange={(e) =>
+                    handleSettingChange({ depth: e.target.value as GlobalCoherenceSettings['depth'] })
+                  }
+                  className="text-sm border border-gray-300 dark:border-gray-700 rounded-md px-2 py-1 bg-white dark:bg-gray-900"
+                  aria-label="Select analysis depth"
+                >
+                  <option value="quick">Quick</option>
+                  <option value="standard">Standard</option>
+                  <option value="thorough">Thorough</option>
+                </select>
               </div>
-              <div className="w-full h-2 bg-gray-200 dark:bg-gray-800 rounded">
+
+              {/* Progress UI while analyzing */}
+              {isAnalyzing && progress ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-gray-700 dark:text-gray-300">
+                    <div>
+                      {passLabel} — Pass {progress.passNumber} / {progress.totalPasses}
+                    </div>
+                    <div>
+                      {progress.scenesAnalyzed} / {progress.totalScenes} scenes
+                    </div>
+                  </div>
+                  <div className="w-full h-2 bg-gray-200 dark:bg-gray-800 rounded">
+                    <div
+                      className="h-2 bg-indigo-600 rounded"
+                      style={{ width: `${Math.max(0, Math.min(100, progress.passProgress))}%` }}
+                    />
+                  </div>
+                  {progress.estimatedTimeRemaining > 0 ? (
+                    <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                      <span aria-hidden="true">🕒</span>
+                      <span>ETA: {formatETA(progress.estimatedTimeRemaining)}</span>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Results summary alert after completion */}
+              {!isAnalyzing && lastAnalysis && summary ? (
                 <div
-                  className="h-2 bg-indigo-600 rounded"
-                  style={{ width: `${Math.max(0, Math.min(100, progress.passProgress))}%` }}
-                />
-              </div>
-              {progress.estimatedTimeRemaining > 0 ? (
-                <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-                  <span aria-hidden="true">🕒</span>
-                  <span>ETA: {formatETA(progress.estimatedTimeRemaining)}</span>
+                  className="p-3 rounded-md border border-green-200 bg-green-50 text-green-800"
+                  role="alert"
+                >
+                  <div className="text-sm font-medium mb-1">Global Coherence Summary</div>
+                  <div className="text-xs space-y-1">
+                    <div>
+                      <span className="font-semibold">{summary.total}</span> issues found across{' '}
+                      <span className="font-semibold">{summary.affected}</span> scenes.
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4">
+                      <div>Flow issues: <span className="font-semibold">{summary.flow}</span></div>
+                      <div>Pacing issues: <span className="font-semibold">{summary.pacing}</span></div>
+                      <div>Thematic breaks: <span className="font-semibold">{summary.theme}</span></div>
+                      <div>Character arc disruptions: <span className="font-semibold">{summary.arc}</span></div>
+                    </div>
+                    <div className="text-[11px] text-green-700 mt-1">
+                      Results feed into scene-level issues to inform rewrites and continuity checks.
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Manuscript not loaded hint */}
+              {!manuscript ? (
+                <div className="text-xs text-gray-600 dark:text-gray-400">
+                  Load a manuscript to enable analysis.
                 </div>
               ) : null}
             </div>
-          ) : null}
-
-          {/* Results summary alert after completion */}
-          {!isAnalyzing && lastAnalysis && summary ? (
-            <div
-              className="p-3 rounded-md border border-green-200 bg-green-50 text-green-800"
-              role="alert"
-            >
-              <div className="text-sm font-medium mb-1">Global Coherence Summary</div>
-              <div className="text-xs space-y-1">
-                <div>
-                  <span className="font-semibold">{summary.total}</span> issues found across{' '}
-                  <span className="font-semibold">{summary.affected}</span> scenes.
-                </div>
-                <div className="grid grid-cols-2 gap-x-4">
-                  <div>Flow issues: <span className="font-semibold">{summary.flow}</span></div>
-                  <div>Pacing issues: <span className="font-semibold">{summary.pacing}</span></div>
-                  <div>Thematic breaks: <span className="font-semibold">{summary.theme}</span></div>
-                  <div>Character arc disruptions: <span className="font-semibold">{summary.arc}</span></div>
-                </div>
-                <div className="text-[11px] text-green-700 mt-1">
-                  Results feed into scene-level issues to inform rewrites and continuity checks.
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {/* Manuscript not loaded hint */}
-          {!manuscript ? (
-            <div className="text-xs text-gray-600 dark:text-gray-400">
-              Load a manuscript to enable analysis.
-            </div>
-          ) : null}
+          )}
         </div>
       )}
-    </div>
+    </AIServiceErrorBoundary>
   );
 };
 

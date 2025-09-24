@@ -6,6 +6,8 @@ import { useAPIConfiguration } from '../hooks/useAPIConfiguration';
 import KeyGate from '../../../../services/ai/KeyGate';
 import { MissingKeyError, InvalidKeyError } from '../../../../services/ai/errors/AIServiceErrors';
 import { useAIStatusStore } from '../../../stores/aiStatusStore';
+import { toast } from '../../../stores/toastStore';
+import { redactObjectSecrets } from '../../../../shared/security';
 
 type TestStatus = 'idle' | 'testing' | 'success' | 'error';
 
@@ -356,7 +358,7 @@ const ProviderBlock: React.FC<{
   const cfg = ensureConfig(providers[provider]);
   const status = testResults[provider];
 
-  console.log(`[ProviderBlock ${provider}] enabled:`, cfg.enabled, 'config:', cfg);
+  console.log(`[ProviderBlock ${provider}] enabled:`, cfg.enabled, 'config:', redactObjectSecrets(cfg));
 
   const handleToggleEnabled = (enabled: boolean) => {
     console.log(`[ProviderBlock ${provider}] Toggle to:`, enabled);
@@ -378,10 +380,16 @@ const ProviderBlock: React.FC<{
       useSettingsStore.setState((state) => ({
         testResults: { ...state.testResults, [provider]: result ? 'success' : 'error' },
       }));
-    } catch {
+      if (result) {
+        toast.success('API Key Validated', `${title} is now active`);
+      } else {
+        toast.error('Invalid API Key', 'Check your settings');
+      }
+    } catch (error) {
       useSettingsStore.setState((state) => ({
         testResults: { ...state.testResults, [provider]: 'error' },
       }));
+      toast.error('Invalid API Key', (error as any)?.message ?? 'Check your settings');
     } finally {
       setTimeout(() => {
         useSettingsStore.setState((state) => ({
@@ -537,8 +545,10 @@ const SettingsModal: React.FC = () => {
       const { status } = useAIStatusStore.getState();
       if (status.available) {
         setFeedback({ type: 'success', message: 'AI services now active' });
+        toast.success('API Key Saved', 'AI services now active');
       } else {
         setFeedback({ type: 'warning', message: 'Settings saved, but AI services are not available yet.' });
+        toast.warning('Settings Saved', 'AI services are not available yet.');
       }
   
       // Close modal on successful save as before
@@ -546,10 +556,14 @@ const SettingsModal: React.FC = () => {
     } catch (error) {
       if (error instanceof MissingKeyError) {
         setGeneralError(error.userMessage);
+        toast.error('Invalid API Key', error.userMessage);
       } else if (error instanceof InvalidKeyError) {
         setGeneralError(error.userMessage);
+        toast.error('Invalid API Key', error.userMessage);
       } else {
+        const msg = (error as any)?.message ?? 'Unknown configuration error';
         setGeneralError('Unknown configuration error');
+        toast.error('Settings Error', msg);
       }
     }
   };

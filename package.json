@@ -8,12 +8,18 @@
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
-    "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
-    "lint:fix": "eslint . --ext .ts,.tsx --fix --max-warnings=0",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage --coverage.provider=v8 --reporter=dot --coverage.reporter=text-summary"
+    "lint": "npx eslint . --ext .ts,.tsx --max-warnings=0",
+    "lint:fix": "npx eslint . --ext .ts,.tsx --fix --max-warnings=0",
+    "typecheck": "npx tsc -p tsconfig.json --noEmit",
+    "test": "npx vitest run",
+    "test:watch": "npx vitest",
+    "test:coverage": "npx vitest run --coverage --coverage.provider=v8 --reporter=dot --coverage.reporter=text-summary",
+    "ci:install": "npm ci",
+    "ci:typecheck": "npm run typecheck",
+    "ci:lint": "npm run lint",
+    "ci:test": "npm run test:coverage",
+    "ci:build": "npm run make",
+    "ci:all": "npm run ci:install && npm run ci:typecheck && npm run ci:lint && npm run ci:test && npm run ci:build"
   },
   "keywords": [
     "electron",
@@ -31,7 +37,7 @@
     "@electron-forge/maker-squirrel": "^7.8.3",
     "@electron-forge/maker-zip": "^7.8.3",
     "@electron-forge/plugin-vite": "^7.8.3",
-    "@eslint/js": "^9.35.0",
+    "@eslint/js": "^9.36.0",
     "@tailwindcss/postcss": "^4.1.12",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.8.0",
@@ -43,6 +49,7 @@
     "@typescript-eslint/eslint-plugin": "^8.43.0",
     "@typescript-eslint/parser": "^8.43.0",
     "@vitejs/plugin-react": "^5.0.2",
+    "@vitest/coverage-v8": "^1.6.1",
     "electron": "^32.3.3",
     "eslint": "^9.35.0",
     "eslint-config-prettier": "^10.1.8",
@@ -53,8 +60,7 @@
     "jsdom": "^26.1.0",
     "typescript": "^5.9.2",
     "vite": "^7.1.4",
-    "vitest": "^1.6.0",
-    "@vitest/coverage-v8": "^1.6.1"
+    "vitest": "^1.6.0"
   },
   "dependencies": {
     "@atlaskit/pragmatic-drag-and-drop": "^1.7.4",
