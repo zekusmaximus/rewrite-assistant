@@ -1,0 +1,82 @@
+{
+  "throughput": {
+    "throughput-10": {
+      "items": 10,
+      "totalTimeMs": 34.21140000000014,
+      "avgMsPerItem": 3.4191899999999804,
+      "percentiles": {
+        "p50": 1.7253000000000611,
+        "p95": 15.127700000000004,
+        "p99": 15.127700000000004
+      },
+      "scenesPerSecond": 292.4669293019709
+    },
+    "throughput-50": {
+      "items": 50,
+      "totalTimeMs": 60.197299999999814,
+      "avgMsPerItem": 1.2024740000000655,
+      "percentiles": {
+        "p50": 1.0470000000000255,
+        "p95": 1.835099999999784,
+        "p99": 5.735300000000279
+      },
+      "scenesPerSecond": 831.6188125480846
+    },
+    "throughput-100": {
+      "items": 100,
+      "totalTimeMs": 90.44120000000021,
+      "avgMsPerItem": 0.9032720000000063,
+      "percentiles": {
+        "p50": 0.8580999999999221,
+        "p95": 1.3900000000003274,
+        "p99": 3.1291000000001077
+      },
+      "scenesPerSecond": 1107.0862375895556
+    },
+    "throughput-500": {
+      "items": 500,
+      "totalTimeMs": 430.1907000000001,
+      "avgMsPerItem": 0.8592427999999936,
+      "percentiles": {
+        "p50": 0.7966000000001259,
+        "p95": 1.469000000000051,
+        "p99": 2.596900000000005
+      },
+      "scenesPerSecond": 1163.815396532863
+    }
+  },
+  "memory": {
+    "memory-leak": {
+      "beforeHeap": 25016680,
+      "afterHeap": 25038640,
+      "heapDiff": 21960,
+      "peakHeap": 30484600,
+      "repeats": 6
+    },
+    "memory-500": {
+      "beforeHeap": 30262392,
+      "afterHeap": 32176520,
+      "heapDiff": 1914128,
+      "peakHeap": 42816272,
+      "repeats": 1
+    }
+  },
+  "latency": {
+    "ui": {
+      "samples": 1,
+      "avgMs": 103.96900000000005,
+      "p50": 103.96900000000005,
+      "p95": 103.96900000000005,
+      "p99": 103.96900000000005
+    }
+  },
+  "timestamp": "2025-09-24T14:37:10.372Z",
+  "environment": {
+    "node": "v22.14.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpus": 6,
+    "totalMem": 8389726208,
+    "ci": false
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "throughput": {
+    "throughput-10": {
+      "items": 10,
+      "totalTimeMs": 37.07430000000022,
+      "avgMsPerItem": 3.705400000000054,
+      "percentiles": {
+        "p50": 2.8195999999998094,
+        "p95": 14.699300000000221,
+        "p99": 14.699300000000221
+      },
+      "scenesPerSecond": 269.87639661034854
+    },
+    "throughput-50": {
+      "items": 50,
+      "totalTimeMs": 106.37620000000015,
+      "avgMsPerItem": 2.1256259999999476,
+      "percentiles": {
+        "p50": 1.3704999999999927,
+        "p95": 7.811400000000049,
+        "p99": 15.127199999999903
+      },
+      "scenesPerSecond": 470.44964636301245
+    },
+    "throughput-100": {
+      "items": 100,
+      "totalTimeMs": 156.5890999999997,
+      "avgMsPerItem": 1.5646229999999923,
+      "percentiles": {
+        "p50": 1.2415000000000873,
+        "p95": 3.9702000000002045,
+        "p99": 7.0300000000002
+      },
+      "scenesPerSecond": 639.1315991136554
+    },
+    "throughput-500": {
+      "items": 500,
+      "totalTimeMs": 513.6932000000002,
+      "avgMsPerItem": 1.0257905999999957,
+      "percentiles": {
+        "p50": 0.9099999999998545,
+        "p95": 1.7692000000001826,
+        "p99": 3.365299999999934
+      },
+      "scenesPerSecond": 974.8578316081315
+    }
+  },
+  "memory": {},
+  "latency": {},
+  "timestamp": "2025-09-24T15:10:03.129Z",
+  "environment": {
+    "node": "v22.14.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpus": 6,
+    "totalMem": 8389726208,
+    "ci": false
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "throughput": {
+    "throughput-10": {
+      "items": 10,
+      "totalTimeMs": 34.4049,
+      "avgMsPerItem": 3.4374999999999547,
+      "percentiles": {
+        "p50": 1.5019000000002052,
+        "p95": 15.71180000000004,
+        "p99": 15.71180000000004
+      },
+      "scenesPerSecond": 290.90909090909474
+    },
+    "throughput-50": {
+      "items": 50,
+      "totalTimeMs": 78.65779999999995,
+      "avgMsPerItem": 1.5716659999999956,
+      "percentiles": {
+        "p50": 1.2460999999998421,
+        "p95": 3.326299999999719,
+        "p99": 8.460099999999784
+      },
+      "scenesPerSecond": 636.2675021283166
+    },
+    "throughput-100": {
+      "items": 100,
+      "totalTimeMs": 159.683,
+      "avgMsPerItem": 1.595139000000031,
+      "percentiles": {
+        "p50": 1.270600000000286,
+        "p95": 4.285800000000108,
+        "p99": 8.018500000000131
+      },
+      "scenesPerSecond": 626.9046145821653
+    },
+    "throughput-500": {
+      "items": 500,
+      "totalTimeMs": 853.5001999999995,
+      "avgMsPerItem": 1.6964055999999892,
+      "percentiles": {
+        "p50": 1.123199999999997,
+        "p95": 4.081400000000031,
+        "p99": 13.4992000000002
+      },
+      "scenesPerSecond": 589.4816664128003
+    }
+  },
+  "memory": {
+    "memory-500": {
+      "beforeHeap": 68056000,
+      "afterHeap": 76804840,
+      "heapDiff": 8748840,
+      "peakHeap": 76804448,
+      "repeats": 1,
+      "notes": "global.gc not available; consider running node with --expose-gc"
+    }
+  },
+  "latency": {
+    "ui": {
+      "samples": 1,
+      "avgMs": 172.3172999999997,
+      "p50": 172.3172999999997,
+      "p95": 172.3172999999997,
+      "p99": 172.3172999999997
+    }
+  },
+  "timestamp": "2025-09-24T15:04:39.358Z",
+  "environment": {
+    "node": "v22.14.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpus": 6,
+    "totalMem": 8389726208,
+    "ci": false
+  }
+}

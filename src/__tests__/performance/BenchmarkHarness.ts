@@ -155,9 +155,9 @@ export class BenchmarkHarness {
 
     // Helper to GC if available
     const runGC = async () => {
-      if (typeof global.gc === 'function') {
+      if (typeof (global as any).gc === 'function') {
         try {
-          global.gc();
+          (global as any).gc();
           // Give event loop a tick to settle
           await new Promise((r) => setTimeout(r, 0));
         } catch {
@@ -189,7 +189,7 @@ export class BenchmarkHarness {
       heapDiff,
       peakHeap: peak,
       repeats: reps,
-      notes: typeof global.gc !== 'function' ? 'global.gc not available; consider running node with --expose-gc' : undefined,
+      notes: typeof (global as any).gc !== 'function' ? 'global.gc not available; consider running node with --expose-gc' : undefined,
     };
   }
 

@@ -85,6 +85,17 @@ describe('No-Fallback Policy Validation', () => {
   describe('Network Disconnection Tests', () => {
     test('Mock fetch to reject with a network error; ensure analysis path rejects appropriately', async () => {
       const manager = new AIServiceManager();
+      
+      // Mock the KeyGate to avoid API key validation issues
+      const mockKeyGate = new KeyGateTestDouble();
+      mockKeyGate.setMockSettings({
+        providers: {
+          openai: { apiKey: 'test-key', model: 'gpt-5' }
+        }
+      });
+      mockKeyGate.setMockConnectionResult('openai', { success: true });
+      (manager as any).keyGate = mockKeyGate;
+      
       manager.configure({
         openai: { apiKey: 'test-key', model: 'gpt-5', timeoutMs: 1000 },
       });
