@@ -430,7 +430,7 @@ const SettingsModal: React.FC = () => {
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'warning'; message: string } | null>(null);
 
-  console.log('[SettingsModal] Rendering, isOpen:', isSettingsOpen, 'providers:', providers);
+  console.log('[SettingsModal] Rendering, isOpen:', isSettingsOpen, 'providers:', redactObjectSecrets(providers));
 
   useEffect(() => {
     if (isSettingsOpen) {
