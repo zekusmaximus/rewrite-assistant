@@ -1,7 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useManuscriptStore } from '../../stores/manuscriptStore';
 import { draggable, dropTargetForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
-import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine';
 import { reorder } from '@atlaskit/pragmatic-drag-and-drop/reorder';
 import useRewriteStore from '../rewrite/stores/rewriteStore';
 
@@ -12,15 +11,53 @@ interface DraggableSceneItemProps {
   onSelect: () => void;
 }
 
-const DraggableSceneItem: React.FC<DraggableSceneItemProps> = ({ 
-  scene, 
-  index, 
-  isSelected, 
-  onSelect 
+interface InsertionDropZoneProps {
+  index: number;
+  isActive: boolean;
+  onDragEnter: () => void;
+  onDragLeave: () => void;
+}
+
+const InsertionDropZone: React.FC<InsertionDropZoneProps> = ({
+  index,
+  isActive,
+  onDragEnter,
+  onDragLeave
+}) => {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    return dropTargetForElements({
+      element,
+      getData: () => ({ insertionIndex: index }),
+      onDragEnter,
+      onDragLeave,
+    });
+  }, [index, onDragEnter, onDragLeave]);
+
+  return (
+    <div
+      ref={ref}
+      className="w-full h-3 flex items-center justify-center transition-all duration-100"
+    >
+      {isActive && (
+        <div className="w-full h-0.5 bg-blue-500 rounded-full transition-all duration-100" />
+      )}
+    </div>
+  );
+};
+
+const DraggableSceneItem: React.FC<DraggableSceneItemProps> = ({
+  scene,
+  index,
+  isSelected,
+  onSelect
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = React.useState(false);
-  const [isDropTarget, setIsDropTarget] = React.useState(false);
   const { hasRewrite } = useRewriteStore();
   const hasRewriteReady = hasRewrite(scene.id);
 
@@ -28,21 +65,12 @@ const DraggableSceneItem: React.FC<DraggableSceneItemProps> = ({
     const element = ref.current;
     if (!element) return;
 
-    return combine(
-      draggable({
-        element,
-        getInitialData: () => ({ sceneId: scene.id, index }),
-        onDragStart: () => setIsDragging(true),
-        onDrop: () => setIsDragging(false),
-      }),
-      dropTargetForElements({
-        element,
-        canDrop: ({ source }) => source.data.sceneId !== scene.id,
-        onDragEnter: () => setIsDropTarget(true),
-        onDragLeave: () => setIsDropTarget(false),
-        onDrop: () => setIsDropTarget(false),
-      })
-    );
+    return draggable({
+      element,
+      getInitialData: () => ({ sceneId: scene.id, index }),
+      onDragStart: () => setIsDragging(true),
+      onDrop: () => setIsDragging(false),
+    });
   }, [scene.id, index]);
 
   return (
@@ -50,10 +78,8 @@ const DraggableSceneItem: React.FC<DraggableSceneItemProps> = ({
       ref={ref}
       onClick={onSelect}
       className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 ${
-        isDragging 
-          ? 'opacity-50 scale-95 border-blue-300 bg-blue-50' 
-          : isDropTarget
-          ? 'border-blue-500 bg-blue-50 scale-105'
+        isDragging
+          ? 'opacity-50 scale-95 border-blue-300 bg-blue-50'
           : isSelected
           ? 'border-blue-500 bg-blue-50'
           : 'border-gray-200 bg-white hover:bg-gray-50 hover:border-gray-300'
@@ -115,6 +141,82 @@ const DraggableSceneItem: React.FC<DraggableSceneItemProps> = ({
 const SceneReorderer: React.FC = () => {
   const { manuscript, selectedSceneId, selectScene, reorderScenes } = useManuscriptStore();
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [activeInsertionIndex, setActiveInsertionIndex] = useState<number | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const autoScrollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const startAutoScroll = useCallback((direction: 'up' | 'down', speed: number) => {
+    if (autoScrollIntervalRef.current) {
+      clearInterval(autoScrollIntervalRef.current);
+    }
+
+    autoScrollIntervalRef.current = setInterval(() => {
+      const container = scrollContainerRef.current;
+      if (!container) return;
+
+      const scrollAmount = Math.max(1, speed);
+      if (direction === 'up') {
+        container.scrollTop = Math.max(0, container.scrollTop - scrollAmount);
+      } else {
+        container.scrollTop = Math.min(
+          container.scrollHeight - container.clientHeight,
+          container.scrollTop + scrollAmount
+        );
+      }
+    }, 16); // ~60fps
+  }, []);
+
+  const stopAutoScroll = useCallback(() => {
+    if (autoScrollIntervalRef.current) {
+      clearInterval(autoScrollIntervalRef.current);
+      autoScrollIntervalRef.current = null;
+    }
+  }, []);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isDragging) return;
+
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const mouseY = e.clientY;
+    const containerTop = rect.top;
+    const containerBottom = rect.bottom;
+
+    const edgeThreshold = 50;
+    const distanceFromTop = mouseY - containerTop;
+    const distanceFromBottom = containerBottom - mouseY;
+
+    if (distanceFromTop < edgeThreshold && distanceFromTop > 0) {
+      // Near top edge
+      const speed = Math.max(1, (edgeThreshold - distanceFromTop) / 5);
+      startAutoScroll('up', speed);
+    } else if (distanceFromBottom < edgeThreshold && distanceFromBottom > 0) {
+      // Near bottom edge
+      const speed = Math.max(1, (edgeThreshold - distanceFromBottom) / 5);
+      startAutoScroll('down', speed);
+    } else {
+      stopAutoScroll();
+    }
+  }, [isDragging, startAutoScroll, stopAutoScroll]);
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        stopAutoScroll();
+      };
+    }
+  }, [isDragging, handleMouseMove, stopAutoScroll]);
+
+  useEffect(() => {
+    return () => {
+      stopAutoScroll();
+    };
+  }, [stopAutoScroll]);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -122,16 +224,30 @@ const SceneReorderer: React.FC = () => {
 
     return dropTargetForElements({
       element,
+      onDragStart: () => {
+        setIsDragging(true);
+        setActiveInsertionIndex(null);
+      },
       onDrop: ({ source, location }) => {
+        setIsDragging(false);
+        setActiveInsertionIndex(null);
+        stopAutoScroll();
+
         const target = location.current.dropTargets[0];
-        if (!target) return;
+        if (!target || !manuscript) return;
 
         const sourceIndex = source.data.index as number;
-        const targetIndex = target.data.index as number;
+        const insertionIndex = target.data.insertionIndex as number;
+
+        if (insertionIndex === undefined || insertionIndex === null) return;
+
+        // Calculate the actual target index for reordering
+        let targetIndex = insertionIndex;
+        if (sourceIndex < insertionIndex) {
+          targetIndex = insertionIndex - 1;
+        }
 
         if (sourceIndex === targetIndex) return;
-
-        if (!manuscript) return;
 
         // Reorder the scenes
         const newOrder = reorder({
@@ -143,7 +259,7 @@ const SceneReorderer: React.FC = () => {
         reorderScenes(newOrder);
       },
     });
-  }, [manuscript, reorderScenes]);
+  }, [manuscript, reorderScenes, stopAutoScroll]);
 
   if (!manuscript) {
     return null;
@@ -155,7 +271,7 @@ const SceneReorderer: React.FC = () => {
   ).filter(Boolean);
 
   return (
-    <div className="h-full overflow-auto">
+    <div ref={scrollContainerRef} className="h-full overflow-auto">
       <div className="p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-medium text-gray-900">Scene Order</h3>
@@ -163,15 +279,34 @@ const SceneReorderer: React.FC = () => {
             Drag to reorder
           </div>
         </div>
-        <div ref={containerRef} className="space-y-2">
+        <div ref={containerRef} className="space-y-0">
+          {/* Top insertion zone */}
+          <InsertionDropZone
+            index={0}
+            isActive={activeInsertionIndex === 0}
+            onDragEnter={() => setActiveInsertionIndex(0)}
+            onDragLeave={() => setActiveInsertionIndex(null)}
+          />
+
           {orderedScenes.map((scene, index) => (
-            <DraggableSceneItem
-              key={scene!.id}
-              scene={scene}
-              index={index}
-              isSelected={selectedSceneId === scene!.id}
-              onSelect={() => selectScene(scene!.id)}
-            />
+            <React.Fragment key={scene!.id}>
+              <div className="mb-2">
+                <DraggableSceneItem
+                  scene={scene}
+                  index={index}
+                  isSelected={selectedSceneId === scene!.id}
+                  onSelect={() => selectScene(scene!.id)}
+                />
+              </div>
+
+              {/* Insertion zone after each scene */}
+              <InsertionDropZone
+                index={index + 1}
+                isActive={activeInsertionIndex === index + 1}
+                onDragEnter={() => setActiveInsertionIndex(index + 1)}
+                onDragLeave={() => setActiveInsertionIndex(null)}
+              />
+            </React.Fragment>
           ))}
         </div>
       </div>
