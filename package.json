@@ -52,6 +52,7 @@
     "@vitest/coverage-v8": "^1.6.1",
     "cross-env": "^10.0.0",
     "electron": "^32.3.3",
+    "electron-rebuild": "^3.2.9",
     "eslint": "^9.35.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import": "^2.32.0",

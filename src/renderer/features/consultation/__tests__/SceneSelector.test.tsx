@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
@@ -5,8 +6,7 @@ import SceneSelector from '../components/SceneSelector';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import type { Manuscript } from '../../../../shared/types';
 
-// Mock the manuscript store
-vi.mock('../../../stores/manuscriptStore');
+// Don't mock the manuscript store, we'll use the real one
 
 const mockManuscript: Manuscript = {
   id: 'test-manuscript',
@@ -102,9 +102,12 @@ describe('SceneSelector', () => {
   const mockOnSelectionChange = vi.fn();
 
   beforeEach(() => {
-    vi.mocked(useManuscriptStore).mockReturnValue({
-      manuscript: mockManuscript
-    } as any);
+    useManuscriptStore.setState({
+      manuscript: mockManuscript,
+      selectedSceneId: null,
+      isLoading: false,
+      error: null
+    });
     mockOnSelectionChange.mockClear();
   });
 
@@ -122,9 +125,7 @@ describe('SceneSelector', () => {
   });
 
   it('should show empty state when no manuscript', () => {
-    vi.mocked(useManuscriptStore).mockReturnValue({
-      manuscript: null
-    } as any);
+    useManuscriptStore.setState({ manuscript: null });
 
     render(
       <SceneSelector
@@ -146,14 +147,14 @@ describe('SceneSelector', () => {
 
     // Check scene1 details
     expect(screen.getByText('Position 1')).toBeInTheDocument();
-    expect(screen.getByText('Moved')).toBeInTheDocument();
+    expect(screen.getAllByText('Moved')).toHaveLength(2); // scene1 and scene3 are both moved
     expect(screen.getByText('1 issue')).toBeInTheDocument();
-    expect(screen.getByText('Alice')).toBeInTheDocument();
+    expect(screen.getAllByText('Alice')).toHaveLength(2); // Alice appears in scene1 and scene3
 
     // Check scene2 details
     expect(screen.getByText('Position 2')).toBeInTheDocument();
-    expect(screen.getByText('Bob')).toBeInTheDocument();
-    expect(screen.getByText('Charlie')).toBeInTheDocument();
+    expect(screen.getAllByText('Bob')).toHaveLength(2); // Bob appears in scene2 and scene3
+    expect(screen.getByText('Charlie')).toBeInTheDocument(); // Charlie only appears in scene2
 
     // Check scene3 details
     expect(screen.getByText('2 issues')).toBeInTheDocument();
@@ -272,9 +273,9 @@ describe('SceneSelector', () => {
         scenes: mockManuscript.scenes.map(s => ({ ...s, hasBeenMoved: false }))
       };
 
-      vi.mocked(useManuscriptStore).mockReturnValue({
+      useManuscriptStore.setState({
         manuscript: manuscriptWithoutMoved
-      } as any);
+      });
 
       render(
         <SceneSelector
@@ -292,9 +293,9 @@ describe('SceneSelector', () => {
         scenes: mockManuscript.scenes.map(s => ({ ...s, continuityAnalysis: undefined }))
       };
 
-      vi.mocked(useManuscriptStore).mockReturnValue({
+      useManuscriptStore.setState({
         manuscript: manuscriptWithoutIssues
-      } as any);
+      });
 
       render(
         <SceneSelector
@@ -365,9 +366,9 @@ describe('SceneSelector', () => {
       }]
     };
 
-    vi.mocked(useManuscriptStore).mockReturnValue({
+    useManuscriptStore.setState({
       manuscript: longTextManuscript
-    } as any);
+    });
 
     render(
       <SceneSelector

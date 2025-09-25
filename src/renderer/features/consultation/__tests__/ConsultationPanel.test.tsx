@@ -1,17 +1,29 @@
+// @vitest-environment jsdom
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import ConsultationPanel from '../components/ConsultationPanel';
 import { useConsultationStore } from '../stores/consultationStore';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import { useAIStatusStore } from '../../../stores/aiStatusStore';
-import { useSettingsStore } from '../../settings/stores/useSettingsStore';
+import ConsultationPanel from '../components/ConsultationPanel';
 
-// Mock all the stores and their hooks
-vi.mock('../stores/consultationStore');
-vi.mock('../../../stores/manuscriptStore');
-vi.mock('../../../stores/aiStatusStore');
-vi.mock('../../settings/stores/useSettingsStore');
+// Mock only the settings store since it's not being imported above
+vi.mock('../../settings/stores/useSettingsStore', () => {
+  const openSettingsSpy = vi.fn();
+  (globalThis as any).__openSettingsSpy = openSettingsSpy;
+
+  const useSettingsStore = ((selector?: (s: { openSettings: () => void }) => unknown) => {
+    const state = { openSettings: openSettingsSpy };
+    return typeof selector === 'function' ? selector(state) : state;
+  }) as any;
+
+  return {
+    __esModule: true,
+    useSettingsStore,
+  };
+});
+
+const openSettingsSpy = (globalThis as any).__openSettingsSpy;
 
 // Mock the child components to focus on the panel logic
 vi.mock('../components/SceneSelector', () => ({
@@ -65,21 +77,79 @@ vi.mock('../components/SessionStatus', () => ({
   default: () => <div data-testid="session-status">Session Status</div>
 }));
 
-describe('ConsultationPanel', () => {
-  const mockConsultationStore = {
-    isPanelOpen: true,
-    selectedSceneIds: [],
-    isSessionActive: false,
+// Helper functions to setup store state
+function seedManuscriptStore() {
+  useManuscriptStore.setState({
+    manuscript: {
+      id: 'test',
+      title: 'Test',
+      scenes: [
+        {
+          id: 'scene1',
+          text: 'Scene 1',
+          wordCount: 2,
+          position: 0,
+          originalPosition: 0,
+          characters: [],
+          timeMarkers: [],
+          locationMarkers: [],
+          hasBeenMoved: false,
+          rewriteStatus: 'pending' as const
+        },
+        {
+          id: 'scene2',
+          text: 'Scene 2',
+          wordCount: 2,
+          position: 1,
+          originalPosition: 1,
+          characters: [],
+          timeMarkers: [],
+          locationMarkers: [],
+          hasBeenMoved: false,
+          rewriteStatus: 'pending' as const
+        }
+      ],
+      originalOrder: ['scene1', 'scene2'],
+      currentOrder: ['scene1', 'scene2']
+    },
+    selectedSceneId: null,
     isLoading: false,
-    error: null,
-    contextSummary: null,
-    conversationHistory: [],
-    currentQuery: '',
+    error: null
+  });
+}
+
+function seedAIStatusStore(partial: Partial<ReturnType<typeof useAIStatusStore.getState>['status']> = {}) {
+  const base = {
+    available: true,
+    workingProviders: ['anthropic'] as Array<'anthropic' | 'openai' | 'google'>,
+    needsConfiguration: false,
+    lastChecked: Date.now(),
+    isChecking: false
+  };
+  useAIStatusStore.setState({
+    status: { ...base, ...partial },
+    checkStatus: vi.fn(),
+    requireAI: vi.fn()
+  });
+}
+
+function seedConsultationStore() {
+  useConsultationStore.setState({
+    currentSessionId: null,
+    isSessionActive: false,
+    sessionStartTime: null,
+    selectedSceneIds: [],
     contextOptions: {
       includeContinuityAnalysis: true,
       includeGlobalCoherence: true,
       includeRewriteHistory: false
     },
+    contextSummary: null,
+    conversationHistory: [],
+    currentQuery: '',
+    isLoading: false,
+    error: null,
+    isPanelOpen: true,
     closePanel: vi.fn(),
     selectScenes: vi.fn(),
     setContextOptions: vi.fn(),
@@ -89,42 +159,15 @@ describe('ConsultationPanel', () => {
     updateCurrentQuery: vi.fn(),
     clearError: vi.fn(),
     clearConversation: vi.fn()
-  };
+  });
+}
 
-  const mockManuscriptStore = {
-    manuscript: {
-      id: 'test',
-      title: 'Test',
-      scenes: [
-        { id: 'scene1', text: 'Scene 1' },
-        { id: 'scene2', text: 'Scene 2' }
-      ],
-      originalOrder: ['scene1', 'scene2'],
-      currentOrder: ['scene1', 'scene2']
-    }
-  };
-
-  const mockAIStatusStore = {
-    status: {
-      available: true,
-      workingProviders: ['claude'],
-      needsConfiguration: false,
-      lastChecked: Date.now(),
-      isChecking: false
-    },
-    checkStatus: vi.fn(),
-    requireAI: vi.fn()
-  };
-
-  const mockSettingsStore = {
-    openSettings: vi.fn()
-  };
-
+describe('ConsultationPanel', () => {
   beforeEach(() => {
-    vi.mocked(useConsultationStore).mockReturnValue(mockConsultationStore);
-    vi.mocked(useManuscriptStore).mockReturnValue(mockManuscriptStore);
-    vi.mocked(useAIStatusStore).mockReturnValue(mockAIStatusStore);
-    vi.mocked(useSettingsStore).mockReturnValue(mockSettingsStore);
+    seedManuscriptStore();
+    seedAIStatusStore();
+    seedConsultationStore();
+    openSettingsSpy.mockReset();
   });
 
   afterEach(() => {
@@ -145,15 +188,12 @@ describe('ConsultationPanel', () => {
   });
 
   it('should show AI configuration required when unconfigured', () => {
-    vi.mocked(useAIStatusStore).mockReturnValue({
-      ...mockAIStatusStore,
-      status: {
-        available: false,
-        workingProviders: [],
-        needsConfiguration: true,
-        lastChecked: Date.now(),
-        isChecking: false
-      }
+    seedAIStatusStore({
+      available: false,
+      workingProviders: [],
+      needsConfiguration: true,
+      lastChecked: Date.now(),
+      isChecking: false
     });
 
     render(<ConsultationPanel isOpen={true} />);
@@ -164,28 +204,22 @@ describe('ConsultationPanel', () => {
   });
 
   it('should handle AI configuration button click', () => {
-    vi.mocked(useAIStatusStore).mockReturnValue({
-      ...mockAIStatusStore,
-      status: {
-        available: false,
-        workingProviders: [],
-        needsConfiguration: true,
-        lastChecked: Date.now(),
-        isChecking: false
-      }
+    seedAIStatusStore({
+      available: false,
+      workingProviders: [],
+      needsConfiguration: true,
+      lastChecked: Date.now(),
+      isChecking: false
     });
 
     render(<ConsultationPanel isOpen={true} />);
 
     fireEvent.click(screen.getByText('Configure AI'));
-    expect(mockSettingsStore.openSettings).toHaveBeenCalled();
+    expect(openSettingsSpy).toHaveBeenCalled();
   });
 
   it('should display error when present', () => {
-    vi.mocked(useConsultationStore).mockReturnValue({
-      ...mockConsultationStore,
-      error: 'Test error message'
-    });
+    useConsultationStore.setState({ error: 'Test error message' });
 
     render(<ConsultationPanel isOpen={true} />);
 
@@ -193,9 +227,10 @@ describe('ConsultationPanel', () => {
   });
 
   it('should clear error when dismiss button clicked', () => {
-    vi.mocked(useConsultationStore).mockReturnValue({
-      ...mockConsultationStore,
-      error: 'Test error'
+    const clearErrorSpy = vi.fn();
+    useConsultationStore.setState({
+      error: 'Test error',
+      clearError: clearErrorSpy
     });
 
     render(<ConsultationPanel isOpen={true} />);
@@ -203,7 +238,7 @@ describe('ConsultationPanel', () => {
     const dismissButton = screen.getByLabelText('Dismiss error');
     fireEvent.click(dismissButton);
 
-    expect(mockConsultationStore.clearError).toHaveBeenCalled();
+    expect(clearErrorSpy).toHaveBeenCalled();
   });
 
   describe('session setup', () => {
@@ -217,29 +252,36 @@ describe('ConsultationPanel', () => {
     });
 
     it('should handle context option changes', () => {
+      const setContextOptionsSpy = vi.fn();
+      useConsultationStore.setState({ setContextOptions: setContextOptionsSpy });
+
       render(<ConsultationPanel isOpen={true} />);
 
       const continuityCheckbox = screen.getByLabelText('Continuity issues');
       fireEvent.click(continuityCheckbox);
 
-      expect(mockConsultationStore.setContextOptions).toHaveBeenCalledWith({
+      expect(setContextOptionsSpy).toHaveBeenCalledWith({
         includeContinuityAnalysis: false
       });
     });
 
     it('should handle scene selection', () => {
+      const selectScenesSpy = vi.fn();
+      useConsultationStore.setState({ selectScenes: selectScenesSpy });
+
       render(<ConsultationPanel isOpen={true} />);
 
       const selectButton = screen.getByText('Select Scenes');
       fireEvent.click(selectButton);
 
-      expect(mockConsultationStore.selectScenes).toHaveBeenCalledWith(['scene1', 'scene2']);
+      expect(selectScenesSpy).toHaveBeenCalledWith(['scene1', 'scene2']);
     });
 
     it('should start session when button clicked', async () => {
-      vi.mocked(useConsultationStore).mockReturnValue({
-        ...mockConsultationStore,
-        selectedSceneIds: ['scene1']
+      const startSessionSpy = vi.fn();
+      useConsultationStore.setState({
+        selectedSceneIds: ['scene1'],
+        startSession: startSessionSpy
       });
 
       render(<ConsultationPanel isOpen={true} />);
@@ -247,7 +289,7 @@ describe('ConsultationPanel', () => {
       const startButton = screen.getByText('Start Consultation');
       fireEvent.click(startButton);
 
-      expect(mockConsultationStore.startSession).toHaveBeenCalled();
+      expect(startSessionSpy).toHaveBeenCalled();
     });
 
     it('should disable start button when no scenes selected', () => {
@@ -258,8 +300,7 @@ describe('ConsultationPanel', () => {
     });
 
     it('should show loading state when starting session', () => {
-      vi.mocked(useConsultationStore).mockReturnValue({
-        ...mockConsultationStore,
+      useConsultationStore.setState({
         selectedSceneIds: ['scene1'],
         isLoading: true
       });
@@ -271,20 +312,21 @@ describe('ConsultationPanel', () => {
   });
 
   describe('active session', () => {
-    const activeSessionMock = {
-      ...mockConsultationStore,
-      isSessionActive: true,
-      contextSummary: {
-        sceneCount: 2,
-        continuityIssueCount: 1,
-        hasGlobalCoherence: true
-      },
-      conversationHistory: [],
-      currentQuery: 'test query'
-    };
+    function seedActiveSession() {
+      useConsultationStore.setState({
+        isSessionActive: true,
+        contextSummary: {
+          sceneCount: 2,
+          continuityIssueCount: 1,
+          hasGlobalCoherence: true
+        },
+        conversationHistory: [],
+        currentQuery: 'test query'
+      });
+    }
 
     it('should show active session UI', () => {
-      vi.mocked(useConsultationStore).mockReturnValue(activeSessionMock);
+      seedActiveSession();
 
       render(<ConsultationPanel isOpen={true} />);
 
@@ -296,41 +338,74 @@ describe('ConsultationPanel', () => {
     });
 
     it('should handle query sending', () => {
-      vi.mocked(useConsultationStore).mockReturnValue(activeSessionMock);
+      const sendQuerySpy = vi.fn();
+      seedActiveSession();
+      useConsultationStore.setState({ sendQuery: sendQuerySpy });
 
       render(<ConsultationPanel isOpen={true} />);
 
       const sendButton = screen.getByText('Send');
       fireEvent.click(sendButton);
 
-      expect(mockConsultationStore.sendQuery).toHaveBeenCalledWith('test query');
+      expect(sendQuerySpy).toHaveBeenCalledWith('test query');
     });
 
     it('should handle clear conversation', () => {
-      vi.mocked(useConsultationStore).mockReturnValue(activeSessionMock);
+      const clearConversationSpy = vi.fn();
+      seedActiveSession();
+      useConsultationStore.setState({
+        clearConversation: clearConversationSpy,
+        conversationHistory: [
+          {
+            query: {
+              question: 'Test question',
+              selectedSceneIds: ['scene1'],
+              includeContext: {
+                continuityIssues: true,
+                readerKnowledge: true,
+                globalCoherence: true,
+                rewriteHistory: false
+              },
+              sessionId: 'session1'
+            },
+            response: {
+              answer: 'Test answer',
+              confidence: 0.9,
+              referencedIssues: [],
+              referencedScenes: ['scene1'],
+              timestamp: Date.now(),
+              modelUsed: 'test-model',
+              sessionId: 'session1'
+            },
+            timestamp: Date.now()
+          }
+        ]
+      });
 
       render(<ConsultationPanel isOpen={true} />);
 
       const clearButton = screen.getByText('Clear Chat');
       fireEvent.click(clearButton);
 
-      expect(mockConsultationStore.clearConversation).toHaveBeenCalled();
+      expect(clearConversationSpy).toHaveBeenCalled();
     });
 
     it('should handle end session', () => {
-      vi.mocked(useConsultationStore).mockReturnValue(activeSessionMock);
+      const endSessionSpy = vi.fn();
+      seedActiveSession();
+      useConsultationStore.setState({ endSession: endSessionSpy });
 
       render(<ConsultationPanel isOpen={true} />);
 
       const endButton = screen.getByText('End Session');
       fireEvent.click(endButton);
 
-      expect(mockConsultationStore.endSession).toHaveBeenCalled();
+      expect(endSessionSpy).toHaveBeenCalled();
     });
 
     it('should disable clear chat when no history', () => {
-      vi.mocked(useConsultationStore).mockReturnValue({
-        ...activeSessionMock,
+      seedActiveSession();
+      useConsultationStore.setState({
         conversationHistory: []
       });
 
@@ -352,10 +427,13 @@ describe('ConsultationPanel', () => {
   });
 
   it('should call checkStatus when panel opens', () => {
+    const checkStatusSpy = vi.fn();
+    useAIStatusStore.setState({ checkStatus: checkStatusSpy });
+
     const { rerender } = render(<ConsultationPanel isOpen={false} />);
-    expect(mockAIStatusStore.checkStatus).not.toHaveBeenCalled();
+    expect(checkStatusSpy).not.toHaveBeenCalled();
 
     rerender(<ConsultationPanel isOpen={true} />);
-    expect(mockAIStatusStore.checkStatus).toHaveBeenCalled();
+    expect(checkStatusSpy).toHaveBeenCalled();
   });
 });

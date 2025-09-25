@@ -123,6 +123,7 @@ const SceneSelector: React.FC<SceneSelectorProps> = ({
             >
               <input
                 type="checkbox"
+                value={scene.id}
                 checked={isSelected}
                 onChange={() => handleSceneToggle(scene.id)}
                 disabled={disabled}

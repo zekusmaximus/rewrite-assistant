@@ -2,7 +2,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import ExportDialog from '../components/ExportDialog';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import useRewriteStore from '../../rewrite/stores/rewriteStore';
@@ -113,20 +113,24 @@ describe('ExportDialog', () => {
 
     render(<ExportDialog isOpen={true} onClose={onClose} />);
 
-    fireEvent.click(screen.getByText('Export'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('Export'));
+    });
 
-    // Wait for the async operation to complete
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        'file:export_with_rewrites',
+        expect.objectContaining({
+          manuscript: expect.any(Object),
+          rewrites: expect.any(Object),
+          options: expect.any(Object)
+        })
+      );
+    });
 
-    expect(mockInvoke).toHaveBeenCalledWith(
-      'file:export_with_rewrites',
-      expect.objectContaining({
-        manuscript: expect.any(Object),
-        rewrites: expect.any(Object),
-        options: expect.any(Object)
-      })
-    );
-    expect(onClose).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalled();
+    });
   });
 
   it('shows error when export fails', async () => {
@@ -140,20 +144,25 @@ describe('ExportDialog', () => {
 
     render(<ExportDialog isOpen={true} onClose={onClose} />);
 
-    fireEvent.click(screen.getByText('Export'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('Export'));
+    });
 
-    // Wait for the async operation and state update to complete
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        'file:export_with_rewrites',
+        expect.objectContaining({
+          manuscript: expect.any(Object),
+          rewrites: expect.any(Object),
+          options: expect.any(Object)
+        })
+      );
+    });
 
-    expect(mockInvoke).toHaveBeenCalledWith(
-      'file:export_with_rewrites',
-      expect.objectContaining({
-        manuscript: expect.any(Object),
-        rewrites: expect.any(Object),
-        options: expect.any(Object)
-      })
-    );
-    expect(screen.getByText('Export failed')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Export failed')).toBeInTheDocument();
+    });
+
     expect(onClose).not.toHaveBeenCalled();
   });
 });
