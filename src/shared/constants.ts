@@ -54,7 +54,13 @@ export const SUPPORTED_FILE_TYPES = [
    // Settings channels
    SETTINGS_LOAD: 'settings:load',
    SETTINGS_SAVE: 'settings:save',
-   SETTINGS_TEST_CONNECTION: 'settings:test_connection'
+   SETTINGS_TEST_CONNECTION: 'settings:test_connection',
+   // Scene consultation channels
+   SCENE_CONSULTATION_START: 'scene-consultation:start',
+   SCENE_CONSULTATION_QUERY: 'scene-consultation:query',
+   SCENE_CONSULTATION_RESPONSE: 'scene-consultation:response',
+   SCENE_CONSULTATION_GET_CONTEXT: 'scene-consultation:get-context',
+   SCENE_CONSULTATION_END: 'scene-consultation:end'
  };
 
 // Default manuscript file name

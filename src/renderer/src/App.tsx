@@ -14,6 +14,8 @@ import ExportDialog from '../features/export/components/ExportDialog';
 import GlobalCoherencePanel from '../features/coherence/components/GlobalCoherencePanel';
 import GlobalCoherenceProgress from '../features/coherence/components/GlobalCoherenceProgress';
 import { useGlobalCoherenceStore } from '../features/coherence/stores/globalCoherenceStore';
+import ConsultationPanel from '../features/consultation/components/ConsultationPanel';
+import { useConsultationStore } from '../features/consultation/stores/consultationStore';
 
 import { useAIStatusStore } from '../stores/aiStatusStore';
  
@@ -38,7 +40,9 @@ const App: React.FC = () => {
   const [rewritePanelOpen, setRewritePanelOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [globalCoherenceOpen, setGlobalCoherenceOpen] = useState(false);
+  const [consultationPanelOpen, setConsultationPanelOpen] = useState(false);
   const isGlobalAnalyzing = useGlobalCoherenceStore((s) => s.isAnalyzing);
+  const { openPanel: openConsultationPanel } = useConsultationStore();
   const sceneViewerRef = useRef<SceneViewerHandle | null>(null);
   const { analyzeMovedScenes } = useAnalysis();
   const { openSettings } = useSettingsStore();
@@ -185,10 +189,50 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isGlobalAnalyzing, setGlobalCoherenceOpen]);
 
+  // Consultation panel shortcut: Ctrl/Cmd + Shift + Q
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Avoid triggering when typing in inputs/textareas/contentEditable or when key repeats
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (event.repeat || target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+          return;
+        }
+      }
+
+      const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+      const key = event.key?.toLowerCase?.() || '';
+      if (isCtrlOrCmd && event.shiftKey && (key === 'q' || event.code === 'KeyQ')) {
+        event.preventDefault();
+        if (manuscript) {
+          setConsultationPanelOpen(true);
+          openConsultationPanel();
+        }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [manuscript, openConsultationPanel]);
+
   // Initialize AI status IPC bridge on mount
   useEffect(() => {
     initIPC();
   }, [initIPC]);
+
+  // Listen for custom consultation open events from scene items
+  useEffect(() => {
+    const handleOpenConsultation = () => {
+      setConsultationPanelOpen(true);
+    };
+
+    window.addEventListener('openConsultation', handleOpenConsultation);
+    return () => {
+      window.removeEventListener('openConsultation', handleOpenConsultation);
+    };
+  }, []);
 
   // Revalidate AI availability after Settings modal closes (best-effort)
   useEffect(() => {
@@ -328,6 +372,16 @@ const App: React.FC = () => {
                   🔍 Find Issues
                 </button>
                 <button
+                  onClick={() => {
+                    setConsultationPanelOpen(true);
+                    openConsultationPanel();
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-orange-600 border border-transparent rounded-md hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  title="Ask AI about scene arrangement (Ctrl+Shift+Q)"
+                >
+                  💬 Ask AI
+                </button>
+                <button
                   onClick={() => setRewritePanelOpen(!rewritePanelOpen)}
                   className="px-4 py-2 text-sm font-medium text-purple-700 bg-purple-100 rounded-md hover:bg-purple-200"
                 >
@@ -401,6 +455,15 @@ const App: React.FC = () => {
                 <div className="p-2 overflow-auto">
                   <GlobalCoherencePanel />
                 </div>
+              </div>
+            )}
+            {manuscript && consultationPanelOpen && (
+              <div className="w-96 bg-gray-50 border-l border-gray-200 overflow-hidden flex flex-col">
+                <ConsultationPanel
+                  isOpen={consultationPanelOpen}
+                  onClose={() => setConsultationPanelOpen(false)}
+                  className="h-full"
+                />
               </div>
             )}
           </>

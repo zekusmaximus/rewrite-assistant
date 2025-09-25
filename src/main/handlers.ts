@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { mainWindow } from './index';
 import { IPC_CHANNELS, SUPPORTED_FILE_TYPES, DEFAULT_MANUSCRIPT_FILE } from '../shared/constants';
-import { Manuscript, Scene, ReaderKnowledge, RewriteVersion } from '../shared/types';
+import { Manuscript, Scene, ReaderKnowledge, RewriteVersion, ConsultationContext, ConsultationQuery, ConsultationResponse, ConsultationSession } from '../shared/types';
 import AIServiceManager from '../services/ai/AIServiceManager';
 import SceneRewriter from '../services/rewrite/SceneRewriter';
 import type { AnalysisRequest, AnalysisType, ClaudeConfig, OpenAIConfig, GeminiConfig } from '../services/ai/types';
@@ -12,6 +12,7 @@ import ManuscriptExporter, { ExportOptions } from '../services/export/Manuscript
 import settingsService from './services/SettingsService';
 import { registerGlobalCoherenceHandlers } from './handlers/globalCoherence';
 import { redactObjectSecrets } from '../shared/security';
+import ConsultationContextService, { ContextOptions } from '../services/consultation/ConsultationContextService';
  
 // AI service manager singleton and helpers
 /**
@@ -23,6 +24,111 @@ const manuscriptExporter = new ManuscriptExporter();
 
 // Cache singleton for analysis results (lazy init)
 const analysisCache = new AnalysisCache();
+
+// Consultation services and session management
+const consultationContextService = new ConsultationContextService({ enableCache: true });
+const consultationSessions = new Map<string, ConsultationSession>();
+
+// Session cleanup after 30 minutes of inactivity
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+function cleanupExpiredSessions(): void {
+  const now = Date.now();
+  for (const [sessionId, session] of consultationSessions.entries()) {
+    if (now - session.lastActivity > SESSION_TIMEOUT_MS) {
+      consultationSessions.delete(sessionId);
+      console.log(`[ConsultationHandler] Cleaned up expired session: ${sessionId}`);
+    }
+  }
+}
+
+// Periodic cleanup every 10 minutes
+setInterval(cleanupExpiredSessions, 10 * 60 * 1000);
+
+function generateSessionId(): string {
+  return `consultation_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function selectModelForConsultation(query: string, hasComplexContext: boolean): AnalysisType {
+  const queryLower = query.toLowerCase();
+
+  // Complex analysis for narrative structure questions
+  if (queryLower.includes('manuscript') || queryLower.includes('overall') ||
+      queryLower.includes('structure') || queryLower.includes('flow') ||
+      hasComplexContext) {
+    return 'complex';
+  }
+
+  // Consistency checks for character/timeline questions
+  if (queryLower.includes('character') || queryLower.includes('timeline') ||
+      queryLower.includes('continuity') || queryLower.includes('consistent')) {
+    return 'consistency';
+  }
+
+  // Simple questions about specific issues
+  return 'simple';
+}
+
+function buildConsultationPrompt(query: string, context: ConsultationContext, conversationHistory: ConsultationSession['conversationHistory']): string {
+  const { selectedScenes, continuityAnalyses, readerKnowledge, globalCoherenceAnalysis } = context;
+
+  let prompt = `You are a manuscript consultation assistant helping an author understand the implications of their scene reordering choices. This is consultation only - you should help them understand their current arrangement, not suggest "better" alternatives.
+
+CURRENT CONSULTATION CONTEXT:
+
+Selected Scenes: ${selectedScenes.length} scene(s)
+- ${selectedScenes.map(s => `Scene "${s.id}" (Position ${s.position}): ${s.text.substring(0, 100)}...`).join('\n- ')}
+
+Reader Knowledge at this point:
+- Known Characters: ${Array.from(readerKnowledge.knownCharacters).join(', ') || 'None'}
+- Timeline Events: ${readerKnowledge.establishedTimeline.map(t => t.label).join(', ') || 'None'}
+- Revealed Plot Points: ${readerKnowledge.revealedPlotPoints.join(', ') || 'None'}
+- Established Settings: ${readerKnowledge.establishedSettings.map(s => s.name).join(', ') || 'None'}`;
+
+  if (continuityAnalyses.length > 0) {
+    prompt += `\n\nCONTINUITY ISSUES DETECTED:`;
+    for (const analysis of continuityAnalyses) {
+      if (analysis.issues.length > 0) {
+        prompt += `\nScene issues (confidence: ${Math.round(analysis.confidence * 100)}%):`;
+        for (const issue of analysis.issues) {
+          prompt += `\n- ${issue.type} (${issue.severity}): ${issue.description}`;
+          if (issue.suggestedFix) {
+            prompt += ` | Suggested fix: ${issue.suggestedFix}`;
+          }
+        }
+      }
+    }
+  }
+
+  if (globalCoherenceAnalysis) {
+    prompt += `\n\nGLOBAL COHERENCE CONTEXT:
+- Manuscript-level structural integrity: ${Math.round(globalCoherenceAnalysis.manuscriptLevel.structuralIntegrity * 100)}%
+- Thematic coherence: ${Math.round(globalCoherenceAnalysis.manuscriptLevel.thematicCoherence * 100)}%`;
+
+    if (globalCoherenceAnalysis.flowIssues.length > 0) {
+      prompt += `\n- Flow issues detected: ${globalCoherenceAnalysis.flowIssues.length}`;
+    }
+  }
+
+  if (conversationHistory.length > 0) {
+    prompt += `\n\nCONVERSATION HISTORY:`;
+    for (const exchange of conversationHistory.slice(-3)) { // Last 3 exchanges
+      prompt += `\nQ: ${exchange.query.question}`;
+      prompt += `\nA: ${exchange.response.answer.substring(0, 200)}...`;
+    }
+  }
+
+  prompt += `\n\nUSER QUESTION: ${query}
+
+Please provide a helpful consultation response that:
+1. Directly addresses their question about the current scene arrangement
+2. References specific continuity issues or context when relevant
+3. Explains the implications of their choices without suggesting changes
+4. Maintains focus on understanding rather than optimization
+
+Response:`;
+
+  return prompt;
+}
 let cacheInitialized = false;
 async function ensureCacheInit(): Promise<void> {
   if (cacheInitialized) return;
@@ -655,6 +761,255 @@ export function setupIPCHandlers(): void {
     }
   });
   
+  // Scene Consultation handlers
+  ipcMain.handle(IPC_CHANNELS.SCENE_CONSULTATION_START, async (event: unknown, payload: unknown) => {
+    try {
+      if (!payload || typeof payload !== 'object') {
+        return toErrorResponse('Invalid payload', 'CONSULTATION_START_FAILED');
+      }
+
+      const p = payload as Record<string, unknown>;
+      const sceneIds = p.sceneIds as string[];
+      const manuscript = p.manuscript as Manuscript;
+
+      if (!Array.isArray(sceneIds) || sceneIds.length === 0) {
+        return toErrorResponse('Scene IDs are required', 'CONSULTATION_START_FAILED');
+      }
+
+      if (!manuscript || !manuscript.scenes || !Array.isArray(manuscript.scenes)) {
+        return toErrorResponse('Valid manuscript is required', 'CONSULTATION_START_FAILED');
+      }
+
+      // Build consultation context options
+      const contextOptions: ContextOptions = {
+        includeContinuityAnalysis: p.includeContinuityAnalysis === true,
+        includeGlobalCoherence: p.includeGlobalCoherence === true,
+        includeRewriteHistory: p.includeRewriteHistory === true,
+        upToSceneIndex: typeof p.upToSceneIndex === 'number' ? p.upToSceneIndex : undefined
+      };
+
+      // Build consultation context
+      const context = await consultationContextService.buildContext(sceneIds, manuscript, contextOptions);
+
+      // Create new session
+      const sessionId = generateSessionId();
+      const session: ConsultationSession = {
+        id: sessionId,
+        startTime: Date.now(),
+        lastActivity: Date.now(),
+        conversationHistory: [],
+        isActive: true
+      };
+
+      consultationSessions.set(sessionId, session);
+
+      console.log(`[ConsultationHandler] Started consultation session ${sessionId} for ${sceneIds.length} scenes`);
+
+      return {
+        ok: true,
+        sessionId,
+        context: {
+          selectedScenes: context.selectedScenes.map(s => ({ id: s.id, position: s.position })), // Minimal scene info for response
+          sceneCount: context.selectedScenes.length,
+          continuityIssueCount: context.continuityAnalyses.reduce((sum, a) => sum + a.issues.length, 0),
+          hasGlobalCoherence: !!context.globalCoherenceAnalysis,
+          readerKnowledgeSummary: {
+            charactersCount: context.readerKnowledge.knownCharacters.size,
+            timelineEventsCount: context.readerKnowledge.establishedTimeline.length,
+            plotPointsCount: context.readerKnowledge.revealedPlotPoints.length,
+            settingsCount: context.readerKnowledge.establishedSettings.length
+          }
+        }
+      };
+    } catch (err) {
+      console.error('[ConsultationHandler] Start session failed:', redactObjectSecrets(err));
+      return toErrorResponse(err, 'CONSULTATION_START_FAILED');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SCENE_CONSULTATION_QUERY, async (event: unknown, payload: unknown) => {
+    try {
+      if (!payload || typeof payload !== 'object') {
+        return toErrorResponse('Invalid payload', 'CONSULTATION_QUERY_FAILED');
+      }
+
+      const queryPayload = payload as ConsultationQuery;
+      const sessionId = queryPayload.sessionId;
+
+      if (!sessionId || typeof queryPayload.question !== 'string' || !queryPayload.question.trim()) {
+        return toErrorResponse('Session ID and question are required', 'CONSULTATION_QUERY_FAILED');
+      }
+
+      // Get existing session
+      const session = consultationSessions.get(sessionId);
+      if (!session || !session.isActive) {
+        return toErrorResponse('Session not found or expired', 'CONSULTATION_SESSION_NOT_FOUND');
+      }
+
+      // Update session activity
+      session.lastActivity = Date.now();
+
+      // Rebuild context for this query (in case manuscript has changed)
+      const manuscript = (payload as any).manuscript as Manuscript;
+      if (!manuscript) {
+        return toErrorResponse('Manuscript is required for consultation query', 'CONSULTATION_QUERY_FAILED');
+      }
+
+      const contextOptions: ContextOptions = {
+        includeContinuityAnalysis: queryPayload.includeContext.continuityIssues,
+        includeGlobalCoherence: queryPayload.includeContext.globalCoherence,
+        includeRewriteHistory: queryPayload.includeContext.rewriteHistory
+      };
+
+      const context = await consultationContextService.buildContext(
+        queryPayload.selectedSceneIds,
+        manuscript,
+        contextOptions
+      );
+
+      // Build AI prompt
+      const prompt = buildConsultationPrompt(queryPayload.question, context, session.conversationHistory);
+
+      // Determine analysis type based on query complexity and context
+      const hasComplexContext = context.globalCoherenceAnalysis !== undefined ||
+                               context.continuityAnalyses.length > 3 ||
+                               context.selectedScenes.length > 5;
+
+      const analysisType = selectModelForConsultation(queryPayload.question, hasComplexContext);
+
+      // Create analysis request using a dummy scene for AI routing
+      const dummyScene: Scene = {
+        id: 'consultation-query',
+        text: prompt,
+        wordCount: prompt.split(' ').length,
+        position: 0,
+        originalPosition: 0,
+        characters: [],
+        timeMarkers: [],
+        locationMarkers: [],
+        hasBeenMoved: false,
+        rewriteStatus: 'pending'
+      };
+
+      const analysisRequest: AnalysisRequest = {
+        scene: dummyScene,
+        previousScenes: [],
+        analysisType,
+        readerContext: context.readerKnowledge
+      };
+
+      // Get AI response
+      const aiResponse = await aiManager.analyzeContinuity(analysisRequest);
+
+      // Extract answer from AI response (assuming it's in the first issue description or we need to adapt this)
+      let answer = 'I understand your question about the scene arrangement. ';
+      if (aiResponse.issues && aiResponse.issues.length > 0) {
+        // For consultation, the "issues" field will contain the consultation response
+        answer = aiResponse.issues[0]?.description || answer;
+      }
+
+      // Create consultation response
+      const consultationResponse: ConsultationResponse = {
+        answer,
+        confidence: aiResponse.metadata.confidence || 0.8,
+        referencedIssues: context.continuityAnalyses.flatMap(a => a.issues).slice(0, 5), // Top 5 relevant issues
+        referencedScenes: context.selectedScenes.map(s => s.id),
+        timestamp: Date.now(),
+        modelUsed: aiResponse.metadata.modelUsed,
+        sessionId
+      };
+
+      // Add to conversation history
+      session.conversationHistory.push({
+        query: queryPayload,
+        response: consultationResponse,
+        timestamp: Date.now()
+      });
+
+      // Limit history size to prevent memory growth
+      if (session.conversationHistory.length > 10) {
+        session.conversationHistory = session.conversationHistory.slice(-10);
+      }
+
+      console.log(`[ConsultationHandler] Processed query in session ${sessionId}, model: ${aiResponse.metadata.modelUsed}`);
+
+      return consultationResponse;
+    } catch (err) {
+      console.error('[ConsultationHandler] Query failed:', redactObjectSecrets(err));
+      return toErrorResponse(err, 'CONSULTATION_QUERY_FAILED');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SCENE_CONSULTATION_GET_CONTEXT, async (event: unknown, payload: unknown) => {
+    try {
+      if (!payload || typeof payload !== 'object') {
+        return toErrorResponse('Invalid payload', 'CONSULTATION_GET_CONTEXT_FAILED');
+      }
+
+      const p = payload as { sessionId: string };
+      const sessionId = p.sessionId;
+
+      if (!sessionId) {
+        return toErrorResponse('Session ID is required', 'CONSULTATION_GET_CONTEXT_FAILED');
+      }
+
+      const session = consultationSessions.get(sessionId);
+      if (!session) {
+        return toErrorResponse('Session not found', 'CONSULTATION_SESSION_NOT_FOUND');
+      }
+
+      // Update last activity
+      session.lastActivity = Date.now();
+
+      return {
+        ok: true,
+        sessionId,
+        isActive: session.isActive,
+        startTime: session.startTime,
+        lastActivity: session.lastActivity,
+        conversationCount: session.conversationHistory.length
+      };
+    } catch (err) {
+      console.error('[ConsultationHandler] Get context failed:', redactObjectSecrets(err));
+      return toErrorResponse(err, 'CONSULTATION_GET_CONTEXT_FAILED');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SCENE_CONSULTATION_END, async (event: unknown, payload: unknown) => {
+    try {
+      if (!payload || typeof payload !== 'object') {
+        return toErrorResponse('Invalid payload', 'CONSULTATION_END_FAILED');
+      }
+
+      const p = payload as { sessionId: string };
+      const sessionId = p.sessionId;
+
+      if (!sessionId) {
+        return toErrorResponse('Session ID is required', 'CONSULTATION_END_FAILED');
+      }
+
+      const session = consultationSessions.get(sessionId);
+      const existed = !!session;
+
+      if (session) {
+        session.isActive = false;
+        consultationSessions.delete(sessionId);
+
+        console.log(`[ConsultationHandler] Ended consultation session ${sessionId} with ${session.conversationHistory.length} exchanges`);
+      }
+
+      return {
+        ok: true,
+        sessionId,
+        ended: existed,
+        message: existed ? 'Session ended successfully' : 'Session was already ended or did not exist'
+      };
+    } catch (err) {
+      console.error('[ConsultationHandler] End session failed:', redactObjectSecrets(err));
+      return toErrorResponse(err, 'CONSULTATION_END_FAILED');
+    }
+  });
+
   // Global Coherence handlers registration
   registerGlobalCoherenceHandlers(aiManager, mainWindow);
 }

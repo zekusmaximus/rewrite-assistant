@@ -3,12 +3,14 @@ import { useManuscriptStore } from '../../stores/manuscriptStore';
 import { draggable, dropTargetForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 import { reorder } from '@atlaskit/pragmatic-drag-and-drop/reorder';
 import useRewriteStore from '../rewrite/stores/rewriteStore';
+import { useConsultationStore } from '../consultation/stores/consultationStore';
 
 interface DraggableSceneItemProps {
   scene: any;
   index: number;
   isSelected: boolean;
   onSelect: () => void;
+  onOpenConsultation?: (sceneId: string) => void;
 }
 
 interface InsertionDropZoneProps {
@@ -54,7 +56,8 @@ const DraggableSceneItem: React.FC<DraggableSceneItemProps> = ({
   scene,
   index,
   isSelected,
-  onSelect
+  onSelect,
+  onOpenConsultation
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = React.useState(false);
@@ -106,6 +109,20 @@ const DraggableSceneItem: React.FC<DraggableSceneItemProps> = ({
           {scene.hasBeenMoved && (
             <div className="w-2 h-2 bg-yellow-400 rounded-full" title="Scene has been moved" />
           )}
+          {onOpenConsultation && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenConsultation(scene.id);
+              }}
+              className="p-1 text-gray-400 hover:text-orange-600 transition-colors"
+              title="Ask AI about this scene"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+          )}
           <div className="text-gray-400 cursor-grab active:cursor-grabbing">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -140,6 +157,7 @@ const DraggableSceneItem: React.FC<DraggableSceneItemProps> = ({
 
 const SceneReorderer: React.FC = () => {
   const { manuscript, selectedSceneId, selectScene, reorderScenes } = useManuscriptStore();
+  const { openPanel, selectScenes } = useConsultationStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [activeInsertionIndex, setActiveInsertionIndex] = useState<number | null>(null);
@@ -173,6 +191,16 @@ const SceneReorderer: React.FC = () => {
       autoScrollIntervalRef.current = null;
     }
   }, []);
+
+  const handleOpenConsultationForScene = useCallback((sceneId: string) => {
+    // Pre-select the scene and open consultation panel
+    selectScenes([sceneId]);
+    openPanel();
+
+    // Notify parent App component that consultation should be opened
+    const event = new CustomEvent('openConsultation', { detail: { sceneId } });
+    window.dispatchEvent(event);
+  }, [selectScenes, openPanel]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!isDragging) return;
@@ -296,6 +324,7 @@ const SceneReorderer: React.FC = () => {
                   index={index}
                   isSelected={selectedSceneId === scene!.id}
                   onSelect={() => selectScene(scene!.id)}
+                  onOpenConsultation={handleOpenConsultationForScene}
                 />
               </div>
 

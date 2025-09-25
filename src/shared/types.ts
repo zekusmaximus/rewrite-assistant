@@ -386,3 +386,55 @@ export interface DiffSegment {
   relatedIssueId?: string;
 }
 
+// Scene Consultation System Types
+export interface ConsultationContext {
+  selectedScenes: Scene[];
+  continuityAnalyses: ContinuityAnalysis[];
+  readerKnowledge: ReaderKnowledge;
+  globalCoherenceAnalysis?: GlobalCoherenceAnalysis;
+  rewriteHistory?: RewriteVersion[];
+}
+
+export interface ConsultationQuery {
+  question: string;
+  selectedSceneIds: string[];
+  includeContext: {
+    continuityIssues: boolean;
+    readerKnowledge: boolean;
+    globalCoherence: boolean;
+    rewriteHistory: boolean;
+  };
+  sessionId?: string;
+}
+
+export interface ConsultationResponse {
+  answer: string;
+  confidence: number; // 0.0-1.0
+  referencedIssues: ContinuityIssue[];
+  referencedScenes: string[];
+  timestamp: number;
+  modelUsed: string;
+  sessionId: string;
+}
+
+export interface ConsultationSession {
+  id: string;
+  startTime: number;
+  lastActivity: number;
+  conversationHistory: Array<{
+    query: ConsultationQuery;
+    response: ConsultationResponse;
+    timestamp: number;
+  }>;
+  isActive: boolean;
+}
+
+export interface ConsultationSettings {
+  preferredModel?: string;
+  includeGlobalCoherenceByDefault: boolean;
+  includeContinuityByDefault: boolean;
+  includeRewriteHistoryByDefault: boolean;
+  maxSessionDuration: number; // minutes
+  maxConversationHistory: number; // number of exchanges to keep
+}
+
