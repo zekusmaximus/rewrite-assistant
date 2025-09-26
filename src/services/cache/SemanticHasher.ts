@@ -11,15 +11,22 @@ import { sha256 } from 'js-sha256';
 import type { Scene, ReaderKnowledge } from '../../shared/types';
 import type { CacheKey } from './types';
 
-// Dynamic require helpers to avoid bundler issues in renderer and keep deps optional at this stage.
-const dynamicRequire: NodeRequire | null = (() => {
+// Dynamic require for optional dependencies - Node.js context only
+function getDynamicRequire(): NodeRequire | null {
+  // Process type guard for tree-shaking
+  if (typeof process === 'undefined' || process.type === 'renderer') {
+    return null; // Renderer context - no native modules
+  }
+
   try {
-     
-    return eval('require');
+    // Use createRequire in Node.js contexts (main process)
+    const { createRequire } = require('module');
+    return createRequire(import.meta.url);
   } catch {
     return null;
   }
-})();
+}
+const dynamicRequire = getDynamicRequire();
 
  // Attempt to load compromise dynamically. Fall back to light regex-based extraction if not present.
 let nlp: unknown = null;

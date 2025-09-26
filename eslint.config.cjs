@@ -7,6 +7,7 @@ const tsPlugin = require('@typescript-eslint/eslint-plugin');
 const reactPlugin = require('eslint-plugin-react');
 const reactHooksPlugin = require('eslint-plugin-react-hooks');
 const importPlugin = require('eslint-plugin-import');
+const securityPlugin = require('eslint-plugin-security');
 
 /** @type {import('eslint').Linter.FlatConfig[]} */
 module.exports = [
@@ -29,6 +30,7 @@ module.exports = [
       react: reactPlugin,
       'react-hooks': reactHooksPlugin,
       import: importPlugin,
+      security: securityPlugin,
     },
     settings: {
       react: { version: 'detect' },
@@ -39,6 +41,7 @@ module.exports = [
       ...tsPlugin.configs.recommended.rules,
       ...reactPlugin.configs.recommended.rules,
       ...reactHooksPlugin.configs.recommended.rules,
+      ...securityPlugin.configs.recommended.rules,
 
       // Project adjustments
       'react/react-in-jsx-scope': 'off',
@@ -67,6 +70,17 @@ module.exports = [
 
       // Disable no-undef for TS (handled by TypeScript)
       'no-undef': 'off',
+
+      // Security rules to prevent unsafe code patterns (strict for eval)
+      'no-eval': 'error',
+      'no-implied-eval': 'error',
+      'security/detect-eval-with-expression': 'error',
+      // Relax other security rules for legitimate patterns in TypeScript code
+      'security/detect-non-literal-require': 'off',
+      'security/detect-object-injection': 'off',
+      'security/detect-non-literal-regexp': 'off',
+      'security/detect-unsafe-regex': 'off',
+      'security/detect-non-literal-fs-filename': 'off',
     },
   },
 
@@ -120,6 +134,9 @@ module.exports = [
     files: ['**/__tests__/**/*.{ts,tsx}', '**/*.test.{ts,tsx}'],
     languageOptions: {
       globals: { ...globals.node, ...globals.browser, ...(globals.jest || {}) },
+    },
+    rules: {
+      // Test files already inherit relaxed security rules from base config
     },
   },
 
