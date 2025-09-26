@@ -21,8 +21,7 @@ import type {
 import AIServiceManager from '../ai/AIServiceManager';
 import { MissingKeyError, InvalidKeyError } from '../ai/errors/AIServiceErrors';
 import AnalysisCache from '../cache/AnalysisCache';
-// Wildcard import to be resilient to either default or named export for ManuscriptCompressor
-import * as ManuscriptCompressorModule from './ManuscriptCompressor';
+import { ManuscriptCompressor } from './ManuscriptCompressor';
 import { TransitionAnalyzer } from './passes/TransitionAnalyzer';
 import { SequenceAnalyzer } from './passes/SequenceAnalyzer';
 import { ChapterAnalyzer } from './passes/ChapterAnalyzer';
@@ -39,20 +38,6 @@ interface SequenceResults {
   theme: ThematicDiscontinuity[];
 }
 
-type CompressorCtor = new (...args: any[]) => {
-  prepareScenesForAnalysis(scenes: Scene[]): Promise<CompressedScene[]>;
-  createManuscriptSkeleton(manuscript: Manuscript): Promise<any>;
-};
-
-function instantiateCompressor(ai: AIServiceManager): InstanceType<CompressorCtor> {
-  const Ctor =
-    (ManuscriptCompressorModule as any).default ??
-    (ManuscriptCompressorModule as any).ManuscriptCompressor;
-  if (!Ctor) {
-    throw new Error('ManuscriptCompressor export not found');
-  }
-  return new Ctor(ai);
-}
 
 /**
  * Coordinates the global coherence analysis pipeline across passes.
@@ -62,7 +47,7 @@ function instantiateCompressor(ai: AIServiceManager): InstanceType<CompressorCto
  */
 export class GlobalAnalysisOrchestrator {
   private ai: AIServiceManager;
-  private compressor: ReturnType<typeof instantiateCompressor>;
+  private compressor: ManuscriptCompressor;
   private cache?: AnalysisCache;
   private cancelled = false;
   private delayBetweenItemsMs = 0;
@@ -75,7 +60,7 @@ export class GlobalAnalysisOrchestrator {
 
   constructor(aiManager?: AIServiceManager, options?: { enableCache?: boolean; delayBetweenItemsMs?: number }) {
     this.ai = aiManager ?? new AIServiceManager();
-    this.compressor = instantiateCompressor(this.ai);
+    this.compressor = new ManuscriptCompressor(this.ai);
     this.transitionAnalyzer = new TransitionAnalyzer(this.ai);
     this.sequenceAnalyzer = new SequenceAnalyzer(this.ai);
     this.chapterAnalyzer = new ChapterAnalyzer(this.ai);
