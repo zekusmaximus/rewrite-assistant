@@ -20,15 +20,22 @@ const TTL_MS = 24 * 60 * 60 * 1000;
 const L1_MAX = 200;
 const L2_MAX_ROWS = 1000;
 
-// Dynamic require helper
-const dynamicRequire: NodeRequire | null = (() => {
+// Dynamic require for optional dependencies - Node.js context only
+function getDynamicRequire(): NodeRequire | null {
+  // Process type guard for tree-shaking
+  if (typeof process === 'undefined' || process.type === 'renderer') {
+    return null; // Renderer context - no native modules
+  }
+
   try {
-     
-    return eval('require');
+    // Use createRequire in Node.js contexts (main process)
+    const { createRequire } = require('module');
+    return createRequire(import.meta.url);
   } catch {
     return null;
   }
-})();
+}
+const dynamicRequire = getDynamicRequire();
 
 type L1Value = CachedAnalysis;
 type L1Key = string;

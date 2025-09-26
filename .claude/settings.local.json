@@ -12,7 +12,8 @@
       "Bash(echo:*)",
       "Bash(rm:*)",
       "Bash(mv:*)",
-      "Bash(Test-Path \"CLAUDE.md\")"
+      "Bash(Test-Path \"CLAUDE.md\")",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []
